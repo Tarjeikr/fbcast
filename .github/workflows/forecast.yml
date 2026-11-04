@@ -1,0 +1,25 @@
+name: forecast
+on:
+  schedule:
+    - cron: "5 10 * * *"   # 11:05 CET in winter: the final Core domain for D+1 is usually on JAO by 10:00 CET; the auction closes 12:00 CET
+    - cron: "5 11 * * *"   # second chance at 12:05 CET; the script exits at once if today's forecast already exists
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt opentimestamps-client
+      - run: python -m fbcast.forecast --wait-minutes 45
+      - name: stamp the forecast on the Bitcoin blockchain (OpenTimestamps)
+        run: |
+          for f in $(git ls-files --others --exclude-standard forecasts | grep '\.json$'); do ots stamp "$f" || true; done
+      - name: commit through the GitHub API, so the commit is signed by GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/api-commit.sh "forecast $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard forecasts) $(git diff --name-only forecasts)

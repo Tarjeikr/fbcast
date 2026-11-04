@@ -1,0 +1,24 @@
+name: score
+on:
+  schedule:
+    - cron: "30 13 * * *"  # 14:30 CET: day-ahead results are on JAO from about 13:00 CET
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt opentimestamps-client
+      - run: python -m fbcast.score
+      - run: python -m fbcast.report
+      - name: upgrade pending timestamp proofs once their Bitcoin block is confirmed
+        run: for f in forecasts/*.ots; do ots upgrade "$f" || true; done; rm -f forecasts/*.ots.bak
+      - name: commit through the GitHub API, so the commit is signed by GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/api-commit.sh "score $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard scorecard forecasts) $(git diff --name-only scorecard forecasts SCORECARD.md)

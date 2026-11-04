@@ -1,0 +1,21 @@
+name: retrain
+on:
+  schedule:
+    - cron: "0 6 * * 1"    # Mondays 07:00 CET: refit on all history to yesterday; the backtest is stored in models/bundle.json
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m fbcast.train
+      - name: commit through the GitHub API, so the commit is signed by GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/api-commit.sh "retrain $(date -u +%Y-%m-%dT%H:%MZ)" $(git diff --name-only models) $(git ls-files --others --exclude-standard models)
