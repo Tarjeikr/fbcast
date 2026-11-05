@@ -11,17 +11,41 @@ from fbcast.features import realized
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _pinball(y, q, tau):
+    d = np.asarray(y) - np.asarray(q)
+    return float(np.mean(np.maximum(tau * d, (tau - 1) * d)))
+
+
+def quantile_scores(H):
+    """Pinball loss, coverage and median error of the spread quantiles, against the climatological quantiles the forecast was issued with."""
+    if "spread_p50" not in H or H.spread_p50.isna().all():
+        return None
+    y = H.spread.values
+    aft = H[H.hour.isin([15, 16, 17])]
+    out = {"pinball": float(np.mean([_pinball(y, H.spread_p10, 0.1), _pinball(y, H.spread_p50, 0.5), _pinball(y, H.spread_p90, 0.9)])),
+           "pinball_clim": float(np.mean([_pinball(y, H.clim_q10, 0.1), _pinball(y, H.clim_q50, 0.5), _pinball(y, H.clim_q90, 0.9)])),
+           "coverage80": float(np.mean((y >= H.spread_p10) & (y <= H.spread_p90))), "coverage80_clim": float(np.mean((y >= H.clim_q10) & (y <= H.clim_q90))),
+           "mae_p50": float(np.mean(np.abs(y - H.spread_p50))), "mae_clim_median": float(np.mean(np.abs(y - H.clim_q50))), "mae_zero": float(np.mean(np.abs(y))),
+           "band_width": float(np.mean(H.spread_p90 - H.spread_p10)),
+           "afternoon_p50": float(aft.spread_p50.mean()), "afternoon_p10": float(aft.spread_p10.mean()), "afternoon_p90": float(aft.spread_p90.mean())}
+    if H.spread_prev.notna().any():
+        out["mae_persistence"] = float(np.mean(np.abs(H.spread - H.spread_prev.fillna(0))))
+    return out
+
+
 def score_day(day, fc):
     sp = data.load_days("shadowPrices", [day])
     npos = data.load_days("netPos", [day])
     if sp.empty:
         return None
-    pr = data.fetch_prices(day, (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
-    R = realized(sp, npos, pr)
-    R = R[R.day == day]
+    prev = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    pr = data.fetch_prices(prev, (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+    Rall = realized(sp, npos, pr)
+    R = Rall[Rall.day == day]
+    Rprev = Rall[Rall.day == prev][["hour", "spread"]].rename(columns={"spread": "spread_prev"})
     if len(R) < 20:
         return None
-    H = pd.DataFrame(fc["hours"]).merge(R[["hour", "bind", "spread", "hub_FR"]], on="hour", how="inner")
+    H = pd.DataFrame(fc["hours"]).merge(R[["hour", "bind", "spread", "hub_FR"]], on="hour", how="inner").merge(Rprev, on="hour", how="left")
     y, s = H.bind.astype(int), (H.spread > 0).astype(int)
     out = {"day": day, "status": fc["status"], "issued_at_utc": fc["issued_at_utc"], "n_hours": int(len(H)),
            "bind": {"actual_hours": int(y.sum()), "expected_hours": round(float(H.p_bind.sum()), 1), "brier": float(np.mean((H.p_bind - y) ** 2)),
@@ -32,6 +56,7 @@ def score_day(day, fc):
                                "p_pos": float(H[H.hour.isin([15, 16, 17])].p_de_above_fr.mean()), "actual_pos": int(H[H.hour.isin([15, 16, 17])].spread.mean() > 0),
                                "p_bind": float(H[H.hour.isin([15, 16, 17])].p_bind.mean()), "actual_bind": float(H[H.hour.isin([15, 16, 17])].bind.mean())},
            "fr_net_position_mean": float(H.hub_FR.mean()) if H.hub_FR.notna().any() else None,
+           "quantiles": quantile_scores(H),
            "hours": [{"hour": int(r.hour), "p_bind": r.p_bind, "bind": int(r.bind), "p_de_above_fr": r.p_de_above_fr, "spread": round(float(r.spread), 1), "e_spread": r.e_spread} for r in H.itertuples()]}
     return out
 
@@ -72,7 +97,8 @@ def main():
         if sc is None:
             continue
         json.dump(sc, open(os.path.join(ROOT, "scorecard", f"{day}.json"), "w"), indent=1)
-        rows.append({"day": day, "status": sc["status"], "bind_brier": sc["bind"]["brier"], "bind_hit": sc["bind"]["hit"], "bind_actual_hours": sc["bind"]["actual_hours"],
+        q = sc.get("quantiles") or {}
+        rows.append({"day": day, "status": sc["status"], "bind_brier": sc["bind"]["brier"], "pinball": q.get("pinball"), "pinball_clim": q.get("pinball_clim"), "coverage80": q.get("coverage80"), "mae_p50": q.get("mae_p50"), "bind_hit": sc["bind"]["hit"], "bind_actual_hours": sc["bind"]["actual_hours"],
                      "bind_expected_hours": sc["bind"]["expected_hours"], "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"], "level_mae": sc["level"]["mae"],
                      "level_mae_zero": sc["level"]["mae_zero"], "aft_actual_spread": sc["afternoon_15_17"]["actual_spread"], "aft_forecast_spread": sc["afternoon_15_17"]["forecast_spread"],
                      "aft_p_pos": sc["afternoon_15_17"]["p_pos"], "aft_actual_pos": sc["afternoon_15_17"]["actual_pos"]})

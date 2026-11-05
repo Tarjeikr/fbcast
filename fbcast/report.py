@@ -22,8 +22,9 @@ def main():
         for h in sc["hours"]:
             hours.append({"day": sc["day"], **h})
         days.append({"day": sc["day"], "bind_brier": sc["bind"]["brier"], "bind_hit": sc["bind"]["hit"], "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"],
-                     "aft_actual": sc["afternoon_15_17"]["actual_spread"], "aft_forecast": sc["afternoon_15_17"]["forecast_spread"], "aft_p_pos": sc["afternoon_15_17"]["p_pos"],
-                     "bind_actual_hours": sc["bind"]["actual_hours"], "bind_expected_hours": sc["bind"]["expected_hours"]})
+                     "aft_actual": sc["afternoon_15_17"]["actual_spread"], "aft_p_pos": sc["afternoon_15_17"]["p_pos"],
+                     "bind_actual_hours": sc["bind"]["actual_hours"], "bind_expected_hours": sc["bind"]["expected_hours"],
+                     "fr_np": sc.get("fr_net_position_mean"), "q": sc.get("quantiles")})
     lines = ["# Scorecard: Core binding-constraint forecast", "", "Forecasts are issued each morning for the next CET day from the published JAO domain, before the day-ahead auction closes; "
              "only forecasts whose issue time precedes the publication of the results count (status `ex-ante`). Metrics compare each forecast with the hour-of-day climatology of the training window.", ""]
     if not hours:
@@ -42,9 +43,22 @@ def main():
         last = sorted(H.day.unique())[-14:]
         lines += block(H[H.day.isin(last)], "Last 14 days")
         lines += block(H[H.hour.isin([13, 14, 15, 16, 17, 18, 19])], "Afternoon hours 13–19 CET")
-        lines += ["", "## Afternoon block 15–17 CET, by day", "", "| Day | P(DE > FR) | Actual spread, €/MWh | Forecast spread, €/MWh | Binding hours expected | Binding hours actual |", "| --- | --- | --- | --- | --- | --- |"]
+        lines += ["", "## By day: afternoon block 15–17 CET and binding hours", "",
+                  "| Day | P(DE > FR), 15–17 | Spread P50 (P10–P90), 15–17, €/MWh | Actual spread 15–17, €/MWh | Binding hours expected | Binding hours actual | French net position, GW (realized, day mean) |",
+                  "| --- | --- | --- | --- | --- | --- | --- |"]
         for r in D.sort_values("day", ascending=False).head(21).itertuples():
-            lines.append(f"| {r.day} | {r.aft_p_pos:.2f} | {r.aft_actual:+.1f} | {r.aft_forecast:+.1f} | {r.bind_expected_hours:.1f} | {r.bind_actual_hours} |")
+            frnp = "n/a" if r.fr_np is None or pd.isna(r.fr_np) else f"{r.fr_np / 1000:+.1f}"
+            band = "n/a" if not r.q else f"{r.q['afternoon_p50']:+.0f} ({r.q['afternoon_p10']:+.0f} to {r.q['afternoon_p90']:+.0f})"
+            lines.append(f"| {r.day} | {r.aft_p_pos:.2f} | {band} | {r.aft_actual:+.1f} | {r.bind_expected_hours:.1f} | {r.bind_actual_hours} | {frnp} |")
+        Q = [d["q"] for d in days if d.get("q")]
+        if Q:
+            n = len(Q)
+            m = lambda k: np.mean([q[k] for q in Q if q.get(k) is not None])
+            lines += ["", "## Spread quantiles (DE−FR, €/MWh)", "", "| Days | Pinball loss | Pinball, climatology | 80% band coverage | Coverage, climatology | P50 MAE | Climatology median MAE | Zero MAE | Persistence D-1 MAE | Band width |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                      f"| {n} | {m('pinball'):.2f} | {m('pinball_clim'):.2f} | {m('coverage80'):.0%} | {m('coverage80_clim'):.0%} | {m('mae_p50'):.1f} | {m('mae_clim_median'):.1f} | {m('mae_zero'):.1f} | {m('mae_persistence'):.1f} | {m('band_width'):.0f} |",
+                      "", "Pinball loss is averaged over the 10th, 50th and 90th percentiles; lower is better. Coverage is the share of hours whose realized spread fell inside the P10–P90 band (target 80%)."]
+        lines += ["", "A positive French net position means France exported into Core; Creys–St-Vulbas is France's export path and cannot bind on days when France imports."]
         hit_sign_days = (np.sign(D.aft_p_pos - 0.5) == np.sign(D.aft_actual)).mean()
         lines += ["", f"Afternoon-block sign hit rate: {hit_sign_days:.0%} over {len(D)} days; share of days with a positive afternoon spread: {(D.aft_actual > 0).mean():.0%}.", "",
                   "## Reliability of P(bind)", "", "| Forecast bin | Hours | Mean forecast | Observed frequency |", "| --- | --- | --- | --- |"]
@@ -56,7 +70,8 @@ def main():
         lines += ["", "## Model and backtest", "", f"Logistic models on the D-1 published Core domain (Creys–St-Vulbas RAM, loading and minRAM top-up, French max net positions) plus hour-of-day climatology; "
                   f"trained on {bundle['train_days'][0]} to {bundle['train_days'][1]} ({bundle['n_train']} hour-rows). Held-out backtest {bt['days'][0]} to {bt['days'][1]}: "
                   f"binding AUC {bt['bind']['auc']:.2f}, Brier {bt['bind']['brier']:.3f} vs {bt['bind']['brier_clim']:.3f} climatology; "
-                  f"sign AUC {bt['sign']['auc']:.2f}, Brier {bt['sign']['brier']:.3f} vs {bt['sign']['brier_clim']:.3f}; spread level MAE {bt['level']['mae']:.1f} vs {bt['level']['mae_zero']:.1f} for a zero forecast (no level skill claimed)."]
+                  f"sign AUC {bt['sign']['auc']:.2f}, Brier {bt['sign']['brier']:.3f} vs {bt['sign']['brier_clim']:.3f}"
+                  + (f"; spread quantiles pinball {bt['quantiles']['pinball']:.2f} vs {bt['quantiles']['pinball_clim']:.2f} climatology, P50 MAE {bt['quantiles']['mae_p50']:.1f} vs {bt['quantiles']['mae_zero']:.1f} for a zero forecast." if bt.get("quantiles") else ".")]
     open(os.path.join(ROOT, "SCORECARD.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines[:12]))
 
