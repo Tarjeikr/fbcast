@@ -1,2 +1,4 @@
-day,issued_at_utc,status,hours_expected_binding,p_bind_afternoon_15_17,p_de_above_fr_afternoon_15_17,e_spread_afternoon_15_17,p_de_above_fr_night_21_23,e_spread_day,creys_min_ram,fr_max_export
-2026-11-04,2026-11-04T04:38:33.192300+00:00,late,9.1,0.743,0.681,24.8,0.023,4.9,474,8388
+day,issued_at_utc,status,hours_expected_binding,p_bind_afternoon_15_17,p_de_above_fr_afternoon_15_17,e_spread_afternoon_15_17,p_de_above_fr_night_21_23,e_spread_day,creys_min_ram,fr_max_export,spread_p50_afternoon_15_17,spread_p10_afternoon_15_17,spread_p90_afternoon_15_17,spread_p50_day
+2026-11-04,2026-11-04T04:38:33.192300+00:00,late,9.1,0.743,0.681,24.8,0.023,4.9,474,8388,,,,
+2026-11-05,2026-11-04T09:58:17.551096+00:00,ex-ante,5.5,0.615,0.47,18.5,0.154,-4.9,511,8350,,,,
+2026-11-06,2026-11-05T09:10:07.205928+00:00,ex-ante,0.0,,,,,,826,7332,,,,-9.4
