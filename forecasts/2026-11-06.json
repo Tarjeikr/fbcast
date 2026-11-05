@@ -1,0 +1,45 @@
+{
+ "day": "2026-11-06",
+ "issued_at_utc": "2026-11-05T09:10:07.205928+00:00",
+ "status": "ex-ante",
+ "domain_published_utc": "2026-11-05T08:54:52.467Z",
+ "results_published_utc": null,
+ "model": {
+  "trained_at": "2026-11-05T08:37:34.004084+00:00",
+  "train_days": [
+   "2026-09-02",
+   "2026-11-05"
+  ],
+  "bundle_sha256": "61251e27d349914aa87603d89f87c6c9a262821f7ea506fd72c5a72b95e6cecc"
+ },
+ "summary": {
+  "hours_expected_binding": 0.0,
+  "p_bind_afternoon_15_17": NaN,
+  "p_de_above_fr_afternoon_15_17": NaN,
+  "spread_p50_afternoon_15_17": NaN,
+  "spread_p10_afternoon_15_17": NaN,
+  "spread_p90_afternoon_15_17": NaN,
+  "p_de_above_fr_night_21_23": NaN,
+  "spread_p50_day": -9.4,
+  "creys_min_ram": 826,
+  "fr_max_export": 7332
+ },
+ "hours": [
+  {
+   "hour": 0,
+   "p_bind": 0.002,
+   "p_de_above_fr": 0.011,
+   "e_spread": -33.0,
+   "spread_p10": -37.9,
+   "spread_p50": -9.4,
+   "spread_p90": -2.9,
+   "clim_q10": -22.9,
+   "clim_q50": -3.6,
+   "clim_q90": 1.4,
+   "creys_ram": 826,
+   "creys_fref": 1013,
+   "maxFR": 7332,
+   "minFR": -14151
+  }
+ ]
+}
