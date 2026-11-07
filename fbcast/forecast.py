@@ -51,19 +51,36 @@ def main():
         return
     deadline = time.time() + 60 * a.wait_minutes
     while True:
-        ok, dom_mod = data.domain_published(day)
+        try:
+            ok, dom_mod = data.domain_published(day)
+        except Exception as e:  # JAO slow or unreachable: treat as not yet published and keep waiting
+            ok, dom_mod = False, None
+            print("JAO not answering (%s); will retry" % type(e).__name__, flush=True)
         if ok:
             break
         if time.time() > deadline:
             print("domain for", day, "not published yet; giving up")
             sys.exit(2)
-        time.sleep(600)
-    published, res_mod = data.results_published(day)
+        time.sleep(300)
+    try:
+        published, res_mod = data.results_published(day)
+        status = "late" if published else "ex-ante"
+    except Exception as e:
+        published, res_mod, status = None, None, "unverified"  # the scorer settles it from JAO's publication time of the results
+        print("results check failed (%s); status left for the scorer to settle" % type(e).__name__, flush=True)
     issued_at = pd.Timestamp.now("UTC")
     bundle_path = os.path.join(ROOT, "models", "bundle.pkl")
     bundle = model.load(bundle_path)
     model_sha = hashlib.sha256(open(bundle_path, "rb").read()).hexdigest()
-    X = features_for_day(day)
+    X = None
+    for attempt in range(4):
+        try:
+            X = features_for_day(day)
+            if X is not None:
+                break
+        except Exception as e:
+            print("data pull failed (%s), attempt %d" % (type(e).__name__, attempt + 1), flush=True)
+        time.sleep(60 * (attempt + 1))
     if X is None:
         print("domain data for", day, "incomplete")
         sys.exit(2)
@@ -75,7 +92,7 @@ def main():
               "maxFR": round(float(r.maxFR)), "minFR": round(float(r.minFR))} for r in P.itertuples()]
     aft = P[P.hour.isin([15, 16, 17])]
     night = P[P.hour.isin([21, 22, 23])]
-    fc = {"day": day, "issued_at_utc": issued_at.isoformat(), "status": "late" if published else "ex-ante",
+    fc = {"day": day, "issued_at_utc": issued_at.isoformat(), "status": status,
           "domain_published_utc": dom_mod, "results_published_utc": res_mod,
           "model": {"trained_at": bundle.get("trained_at"), "train_days": bundle.get("train_days"), "bundle_sha256": model_sha},
           "summary": {"hours_expected_binding": round(float(P.p_bind.sum()), 1), "p_bind_afternoon_15_17": round(float(aft.p_bind.mean()), 3),

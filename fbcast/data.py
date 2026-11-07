@@ -14,7 +14,7 @@ FC_KEEP = ["dateTimeUtc", "tso", "cneName", "contName", "direction", "elementTyp
 _S = requests.Session()
 
 
-def _get(ds, f, t, extra=None, take=4000, retries=5, single=False):
+def _get(ds, f, t, extra=None, take=4000, retries=5, single=False, timeout=180):
     rows, skip, last_mod = [], 0, None
     while True:
         p = {"FromUtc": f.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "ToUtc": t.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "Skip": skip, "Take": take}
@@ -22,14 +22,14 @@ def _get(ds, f, t, extra=None, take=4000, retries=5, single=False):
             p.update(extra)
         for a in range(retries):
             try:
-                r = _S.get(JAO + ds, params=p, timeout=180)
+                r = _S.get(JAO + ds, params=p, timeout=timeout)
                 r.raise_for_status()
                 j = r.json()
                 break
             except Exception:
                 if a == retries - 1:
                     raise
-                time.sleep(5 * (a + 1))
+                time.sleep(10 * (a + 1))
         data = j.get("data", [])
         last_mod = j.get("lastModifiedOn") or last_mod
         rows.extend(data)
@@ -96,11 +96,11 @@ def fetch_prices(start, end, zones=("DE-LU", "FR")):
 def results_published(day):
     """True if the day-ahead results (shadow prices) for CET day `day` are on JAO, with their publication time."""
     f, t = day_bounds(day)
-    rows, last_mod = _get("shadowPrices", f, t, take=1, single=True)
+    rows, last_mod = _get("shadowPrices", f, t, take=1, single=True, retries=2, timeout=60)
     return len(rows) > 0, last_mod
 
 
 def domain_published(day):
     f, t = day_bounds(day)
-    rows, last_mod = _get("finalComputation", f, f + pd.Timedelta(minutes=60), {"Filter": json.dumps({"Presolved": True})}, take=1, single=True)
+    rows, last_mod = _get("finalComputation", f, f + pd.Timedelta(minutes=60), {"Filter": json.dumps({"Presolved": True})}, take=1, single=True, retries=2, timeout=60)
     return len(rows) > 0, last_mod

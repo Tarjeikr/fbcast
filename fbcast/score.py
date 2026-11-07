@@ -34,6 +34,10 @@ def quantile_scores(H):
 
 
 def score_day(day, fc):
+    _, results_pub = data.results_published(day)
+    status = fc["status"]
+    if status == "unverified":
+        status = "ex-ante" if results_pub and fc["issued_at_utc"] < results_pub else "late"
     sp = data.load_days("shadowPrices", [day])
     npos = data.load_days("netPos", [day])
     if sp.empty:
@@ -47,7 +51,7 @@ def score_day(day, fc):
         return None
     H = pd.DataFrame(fc["hours"]).merge(R[["hour", "bind", "spread", "hub_FR"]], on="hour", how="inner").merge(Rprev, on="hour", how="left")
     y, s = H.bind.astype(int), (H.spread > 0).astype(int)
-    out = {"day": day, "status": fc["status"], "issued_at_utc": fc["issued_at_utc"], "n_hours": int(len(H)),
+    out = {"day": day, "status": status, "issued_at_utc": fc["issued_at_utc"], "results_published_utc": results_pub, "n_hours": int(len(H)),
            "bind": {"actual_hours": int(y.sum()), "expected_hours": round(float(H.p_bind.sum()), 1), "brier": float(np.mean((H.p_bind - y) ** 2)),
                     "hit": float(((H.p_bind > 0.5) == y).mean()), "logloss": float(-np.mean(y * np.log(H.p_bind.clip(1e-3, 1 - 1e-3)) + (1 - y) * np.log(1 - H.p_bind.clip(1e-3, 1 - 1e-3))))},
            "sign": {"actual_pos_hours": int(s.sum()), "brier": float(np.mean((H.p_de_above_fr - s) ** 2)), "hit": float(((H.p_de_above_fr > 0.5) == s).mean())},
@@ -71,8 +75,8 @@ def verify():
             data.fetch_day(ds, day, force=True)
         new = score_day(day, fc)
         same = new is not None and abs(new["bind"]["brier"] - old["bind"]["brier"]) < 1e-6 and abs(new["sign"]["brier"] - old["sign"]["brier"]) < 1e-6 and new["bind"]["actual_hours"] == old["bind"]["actual_hours"]
-        ok_time = (fc["status"] != "ex-ante") or (fc.get("results_published_utc") is None) or (fc["issued_at_utc"] < fc["results_published_utc"])
-        print(f"{day}: scorecard {'reproduced' if same else 'DIFFERS'}; issued {fc['issued_at_utc'][:16]} status {fc['status']}; results published {new['results_published_utc'] if new and 'results_published_utc' in new else data.results_published(day)[1]}")
+        ok_time = (new is None) or (new["status"] != "ex-ante") or (new.get("results_published_utc") is None) or (fc["issued_at_utc"] < new["results_published_utc"])
+        print(f"{day}: scorecard {'reproduced' if same else 'DIFFERS'}; issued {fc['issued_at_utc'][:16]} status {new['status'] if new else fc['status']}; results published {new['results_published_utc'] if new else 'n/a'}")
         bad += (not same) or (not ok_time)
     print("verification", "PASSED" if bad == 0 else f"FAILED on {bad} day(s)")
     return bad
