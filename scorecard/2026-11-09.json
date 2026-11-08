@@ -1,0 +1,242 @@
+{
+ "day": "2026-11-09",
+ "status": "ex-ante",
+ "issued_at_utc": "2026-11-08T09:19:22.022558+00:00",
+ "results_published_utc": "2026-11-08T12:53:21.067Z",
+ "n_hours": 24,
+ "bind": {
+  "actual_hours": 0,
+  "expected_hours": 9.7,
+  "brier": 0.21133262499999997,
+  "hit": 0.6666666666666666,
+  "logloss": 0.6122220166648562
+ },
+ "sign": {
+  "actual_pos_hours": 8,
+  "brier": 0.3040980416666667,
+  "hit": 0.5
+ },
+ "level": {
+  "mae": 25.852395833333343,
+  "mae_zero": 15.176562500000008,
+  "actual_mean": 11.515937500000007,
+  "forecast_mean": 19.40416666666667
+ },
+ "afternoon_15_17": {
+  "actual_spread": 76.77000000000002,
+  "forecast_spread": 28.96666666666667,
+  "p_pos": 0.8076666666666666,
+  "actual_pos": 1,
+  "p_bind": 0.6856666666666666,
+  "actual_bind": 0.0
+ },
+ "fr_net_position_mean": 2915.9541666666664,
+ "quantiles": {
+  "pinball": 6.957899305555557,
+  "pinball_clim": 5.821684027777781,
+  "coverage80": 0.4166666666666667,
+  "coverage80_clim": 0.7916666666666666,
+  "mae_p50": 18.181354166666676,
+  "mae_clim_median": 15.630104166666671,
+  "mae_zero": 15.176562500000008,
+  "band_width": 41.55416666666667,
+  "afternoon_p50": 10.233333333333333,
+  "afternoon_p10": -0.06666666666666665,
+  "afternoon_p90": 71.7,
+  "mae_persistence": 14.838958333333343
+ },
+ "hours": [
+  {
+   "hour": 0,
+   "p_bind": 0.189,
+   "bind": 0,
+   "p_de_above_fr": 0.189,
+   "spread": -0.9,
+   "e_spread": 4.7
+  },
+  {
+   "hour": 1,
+   "p_bind": 0.26,
+   "bind": 0,
+   "p_de_above_fr": 0.249,
+   "spread": -0.7,
+   "e_spread": 9.5
+  },
+  {
+   "hour": 2,
+   "p_bind": 0.391,
+   "bind": 0,
+   "p_de_above_fr": 0.399,
+   "spread": -1.1,
+   "e_spread": 16.5
+  },
+  {
+   "hour": 3,
+   "p_bind": 0.699,
+   "bind": 0,
+   "p_de_above_fr": 0.839,
+   "spread": -1.1,
+   "e_spread": 30.7
+  },
+  {
+   "hour": 4,
+   "p_bind": 0.824,
+   "bind": 0,
+   "p_de_above_fr": 0.919,
+   "spread": -1.3,
+   "e_spread": 38.8
+  },
+  {
+   "hour": 5,
+   "p_bind": 0.823,
+   "bind": 0,
+   "p_de_above_fr": 0.906,
+   "spread": -3.2,
+   "e_spread": 38.4
+  },
+  {
+   "hour": 6,
+   "p_bind": 0.551,
+   "bind": 0,
+   "p_de_above_fr": 0.792,
+   "spread": -10.3,
+   "e_spread": 28.7
+  },
+  {
+   "hour": 7,
+   "p_bind": 0.433,
+   "bind": 0,
+   "p_de_above_fr": 0.759,
+   "spread": 25.8,
+   "e_spread": 19.3
+  },
+  {
+   "hour": 8,
+   "p_bind": 0.335,
+   "bind": 0,
+   "p_de_above_fr": 0.568,
+   "spread": -0.4,
+   "e_spread": 17.7
+  },
+  {
+   "hour": 9,
+   "p_bind": 0.203,
+   "bind": 0,
+   "p_de_above_fr": 0.236,
+   "spread": 0.0,
+   "e_spread": 11.0
+  },
+  {
+   "hour": 10,
+   "p_bind": 0.346,
+   "bind": 0,
+   "p_de_above_fr": 0.393,
+   "spread": 0.0,
+   "e_spread": 12.8
+  },
+  {
+   "hour": 11,
+   "p_bind": 0.22,
+   "bind": 0,
+   "p_de_above_fr": 0.177,
+   "spread": 0.0,
+   "e_spread": 6.9
+  },
+  {
+   "hour": 12,
+   "p_bind": 0.2,
+   "bind": 0,
+   "p_de_above_fr": 0.136,
+   "spread": 0.8,
+   "e_spread": 1.1
+  },
+  {
+   "hour": 13,
+   "p_bind": 0.313,
+   "bind": 0,
+   "p_de_above_fr": 0.233,
+   "spread": -1.0,
+   "e_spread": 14.8
+  },
+  {
+   "hour": 14,
+   "p_bind": 0.501,
+   "bind": 0,
+   "p_de_above_fr": 0.683,
+   "spread": -8.1,
+   "e_spread": 21.6
+  },
+  {
+   "hour": 15,
+   "p_bind": 0.659,
+   "bind": 0,
+   "p_de_above_fr": 0.796,
+   "spread": -13.7,
+   "e_spread": 30.7
+  },
+  {
+   "hour": 16,
+   "p_bind": 0.72,
+   "bind": 0,
+   "p_de_above_fr": 0.817,
+   "spread": 99.1,
+   "e_spread": 31.5
+  },
+  {
+   "hour": 17,
+   "p_bind": 0.678,
+   "bind": 0,
+   "p_de_above_fr": 0.81,
+   "spread": 144.9,
+   "e_spread": 24.7
+  },
+  {
+   "hour": 18,
+   "p_bind": 0.383,
+   "bind": 0,
+   "p_de_above_fr": 0.68,
+   "spread": 32.9,
+   "e_spread": 11.7
+  },
+  {
+   "hour": 19,
+   "p_bind": 0.247,
+   "bind": 0,
+   "p_de_above_fr": 0.496,
+   "spread": 6.1,
+   "e_spread": 23.4
+  },
+  {
+   "hour": 20,
+   "p_bind": 0.099,
+   "bind": 0,
+   "p_de_above_fr": 0.291,
+   "spread": 9.4,
+   "e_spread": 21.0
+  },
+  {
+   "hour": 21,
+   "p_bind": 0.248,
+   "bind": 0,
+   "p_de_above_fr": 0.543,
+   "spread": -2.1,
+   "e_spread": 23.5
+  },
+  {
+   "hour": 22,
+   "p_bind": 0.259,
+   "bind": 0,
+   "p_de_above_fr": 0.488,
+   "spread": 1.3,
+   "e_spread": 15.7
+  },
+  {
+   "hour": 23,
+   "p_bind": 0.104,
+   "bind": 0,
+   "p_de_above_fr": 0.19,
+   "spread": 0.0,
+   "e_spread": 11.0
+  }
+ ]
+}
