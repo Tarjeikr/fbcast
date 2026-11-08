@@ -74,6 +74,11 @@ def main():
                   f"binding AUC {bt['bind']['auc']:.2f}, Brier {bt['bind']['brier']:.3f} vs {bt['bind']['brier_clim']:.3f} climatology; "
                   f"sign AUC {bt['sign']['auc']:.2f}, Brier {bt['sign']['brier']:.3f} vs {bt['sign']['brier_clim']:.3f}"
                   + (f"; spread quantiles pinball {bt['quantiles']['pinball']:.2f} vs {bt['quantiles']['pinball_clim']:.2f} climatology, P50 MAE {bt['quantiles']['mae_p50']:.1f} vs {bt['quantiles']['mae_zero']:.1f} for a zero forecast." if bt.get("quantiles") else ".")]
+    st_fn = os.path.join(ROOT, "scorecard", "last_run.txt")
+    if os.path.exists(st_fn):
+        st = json.load(open(st_fn))
+        note = f"Last scoring run: {st['run_utc']} UTC." + (f" Awaiting scoring (retried each run): {', '.join(st['not_scored'])}." if st.get("not_scored") else " All published days scored.")
+        lines.insert(2, note); lines.insert(3, "")
     open(os.path.join(ROOT, "SCORECARD.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines[:12]))
 

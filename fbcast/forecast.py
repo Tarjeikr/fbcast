@@ -100,7 +100,7 @@ def main():
     night = P[P.hour.isin([21, 22, 23])]
     fc = {"day": day, "issued_at_utc": issued_at.isoformat(), "status": status,
           "domain_published_utc": dom_mod, "results_published_utc": res_mod,
-          "model": {"trained_at": bundle.get("trained_at"), "train_days": bundle.get("train_days"), "bundle_sha256": model_sha},
+          "model": {"trained_at": bundle.get("trained_at"), "train_days": bundle.get("train_days"), "bundle_sha256": model_sha, "rules": model.RULES},
           "summary": {"hours_expected_binding": round(float(P.p_bind.sum()), 1), "p_bind_afternoon_15_17": round(float(aft.p_bind.mean()), 3),
                       "p_de_above_fr_afternoon_15_17": round(float(aft.p_pos.mean()), 3),
                       "spread_p50_afternoon_15_17": round(float(aft.q50.mean()), 1), "spread_p10_afternoon_15_17": round(float(aft.q10.mean()), 1), "spread_p90_afternoon_15_17": round(float(aft.q90.mean()), 1),

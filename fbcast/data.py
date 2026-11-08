@@ -76,20 +76,26 @@ def load_days(ds, days, workers=4):
 
 
 def fetch_prices(start, end, zones=("DE-LU", "FR")):
-    """Day-ahead prices from energy-charts (SMARD), native resolution, as a DataFrame with columns t, DE, FR."""
+    """Day-ahead prices from energy-charts (SMARD), native resolution, as a DataFrame with columns t, DE, FR.
+    The API rate-limits shared addresses (HTTP 429), so requests back off patiently and honour Retry-After."""
     out = None
     for bzn in zones:
         col = "DE" if bzn == "DE-LU" else bzn
-        for a in range(4):
-            r = _S.get(PRICES, params={"bzn": bzn, "start": start, "end": end}, timeout=120)
-            if r.status_code == 200:
-                break
-            time.sleep(20)
+        r = None
+        for a in range(7):
+            try:
+                r = _S.get(PRICES, params={"bzn": bzn, "start": start, "end": end}, timeout=120)
+                if r.status_code == 200:
+                    break
+                wait = int(r.headers.get("Retry-After", 0) or 0) or min(120, 20 * 2 ** a)
+            except Exception:
+                wait = min(120, 20 * 2 ** a)
+            time.sleep(wait)
         r.raise_for_status()
         j = r.json()
         d = pd.DataFrame({"t": pd.to_datetime(j["unix_seconds"], unit="s", utc=True), col: j["price"]})
         out = d if out is None else out.merge(d, on="t", how="outer")
-        time.sleep(3)
+        time.sleep(5)
     return out.sort_values("t").dropna().reset_index(drop=True)
 
 

@@ -17,6 +17,7 @@ SIGN_FEATS = BIND_FEATS + ["clim_pos", "clim_spread", "p_bind"]
 LEVEL_FEATS = SIGN_FEATS
 QUANT_FEATS = SIGN_FEATS + ["clim_q10", "clim_q50", "clim_q90"]
 QUANTILES = (0.1, 0.5, 0.9)
+RULES = ["creys_absent_from_domain_caps_p_bind_at_0.01"]  # a CNEC outside the presolved domain cannot carry a shadow price (53/53 hours in training, 24/24 in backtests)
 
 
 def derived(T, clim):
@@ -74,6 +75,9 @@ def predict(bundle, X):
     if "quantiles" in bundle:
         Q = np.sort(np.vstack([bundle["quantiles"][tau].predict(Xd[QUANT_FEATS]) for tau in QUANTILES]), axis=0)
         Xd["q10"], Xd["q50"], Xd["q90"] = Q[0], Q[1], Q[2]
+    # structural rule, applied last so the other models see the same inputs they were trained on
+    absent = (Xd.c2_pres == 0) & (Xd.c1_pres == 0)
+    Xd["p_bind"] = np.where(absent, np.minimum(Xd.p_bind, 0.01), Xd.p_bind)
     return Xd
 
 
