@@ -21,35 +21,49 @@ excluded from the scorecard.
 
 * `p_bind`: probability that Creys–St-Vulbas Ouest (either circuit) carries a positive shadow price in the hour.
 * `p_de_above_fr`: probability that the DE–LU day-ahead price exceeds the FR price in the hour.
-* `e_spread`: expected DE−FR spread in €/MWh (reported for completeness; the backtest shows no level skill).
+* `spread_p10`, `spread_p50`, `spread_p90`: the 10th, 50th and 90th percentiles of the DE−FR spread in €/MWh, from quantile
+  regressions on the same information set. The median is the level forecast; the P10–P90 band is a forecast of how wide
+  the hour's outcome can be. (`e_spread`, a mean-regression value, is kept in the files for continuity; it has no skill.)
 
-Daily summaries: expected number of binding hours, the 15–17 CET block (where the German premium is made) and the
-21–23 CET block.
+Daily summaries: expected number of binding hours, the 15–17 CET block (where the German premium is made) with its
+sign probability and P50/P10/P90, and the 21–23 CET block.
 
 ## Model
 
-Two logistic regressions and one ridge regression, all on the D-1 published domain plus hour-of-day climatology:
+Two logistic regressions and three linear quantile regressions (P10, P50, P90), all on the D-1 published domain plus
+hour-of-day climatology:
 
 * Creys–St-Vulbas: presolved flag, RAM/Fmax, loading (Fref/Fmax), minRAM top-up (AMR/Fmax);
 * French max export and max import net positions for the hour;
 * hour-of-day climatology from the training window, weekend flag;
-* for the spread models, additionally the binding probability and the hour's climatological sign and level.
+* for the spread models, additionally the binding probability and the hour's climatological sign, level and quantiles.
+
+One structural rule is applied after the models: when neither circuit of the line is in the presolved Core domain for an hour,
+the line cannot carry a shadow price, so `p_bind` is capped at 0.01 (53 of 53 such hours in the training history and 24 of 24 in
+the two backtest windows had no binding). It was added on 8 Nov 2026 after the 9 Nov forecast gave 0.7 for hours in which the
+line was absent from the domain; forecasts issued from 9 Nov record it under `model.rules`.
 
 No lagged realized values are used. On the 2026 data they added noise, and leaving them out means a forecast
 depends only on what JAO publishes for the target day, which keeps the audit trail simple. Models are refit weekly
 (`fbcast.train`, Mondays) on all history; the backtest is stored with the model in `models/bundle.json`.
 
-## Backtest (strict time split, trained to 16 Oct, tested 17 Oct–3 Nov 2026, 432 hours)
+## Backtest (strict time split, trained to 18 Oct, tested 19 Oct–5 Nov 2026, 432 hours)
 
 | Target | AUC | Brier | Brier, climatology | Hit rate | Hit rate, climatology |
 | --- | --- | --- | --- | --- | --- |
-| Creys–St-Vulbas binds | 0.83 | 0.157 | 0.215 | 77% | 66% |
-| DE price above FR | 0.86 | 0.144 | 0.220 | 78% | 64% |
-| DE−FR level (MAE, €/MWh) | — | 23.5 | 23.8 (zero forecast) | — | — |
+| Creys–St-Vulbas binds | 0.82 | 0.156 | 0.200 | 77% | 66% |
+| DE price above FR | 0.87 | 0.140 | 0.215 | 78% | 64% |
+
+| Spread quantiles (€/MWh) | Model | Climatology quantiles | Zero forecast | Persistence D-1 |
+| --- | --- | --- | --- | --- |
+| Pinball loss (mean of P10, P50, P90) | 6.9 | 7.9 | — | — |
+| P50 absolute error | 19.2 | 21.5 | 21.2 | 33.8 |
+| 80% band coverage | 76% | 75% | — | — |
 
 The binding model's skill comes from the published loading of the line (Fref/Fmax) and the size of its minRAM
-top-up; the sign model's skill comes from the same variables plus the French export room. The level of the spread
-is not forecastable from this information set: the hourly distribution is dominated by spikes.
+top-up; the sign model's skill comes from the same variables plus the French export room. The level of the spread is
+only weakly forecastable from this information set: the median beats the climatological median and a zero forecast
+by about 10% and persistence by more than 40%, and the band is honest about the rest.
 
 ## Running it
 
