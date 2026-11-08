@@ -48,8 +48,9 @@ def main():
                   "| --- | --- | --- | --- | --- | --- | --- |"]
         for r in D.sort_values("day", ascending=False).head(21).itertuples():
             frnp = "n/a" if r.fr_np is None or pd.isna(r.fr_np) else f"{r.fr_np / 1000:+.1f}"
-            band = "n/a" if not r.q else f"{r.q['afternoon_p50']:+.0f} ({r.q['afternoon_p10']:+.0f} to {r.q['afternoon_p90']:+.0f})"
-            lines.append(f"| {r.day} | {r.aft_p_pos:.2f} | {band} | {r.aft_actual:+.1f} | {r.bind_expected_hours:.1f} | {r.bind_actual_hours} | {frnp} |")
+            band = "n/a" if not r.q or pd.isna(r.q.get("afternoon_p50", np.nan)) else f"{r.q['afternoon_p50']:+.0f} ({r.q['afternoon_p10']:+.0f} to {r.q['afternoon_p90']:+.0f})"
+            ppos = "n/a" if pd.isna(r.aft_p_pos) else f"{r.aft_p_pos:.2f}"
+            lines.append(f"| {r.day} | {ppos} | {band} | {r.aft_actual:+.1f} | {r.bind_expected_hours:.1f} | {r.bind_actual_hours} | {frnp} |")
         Q = [d["q"] for d in days if d.get("q")]
         if Q:
             n = len(Q)
@@ -59,8 +60,9 @@ def main():
                       f"| {n} | {m('pinball'):.2f} | {m('pinball_clim'):.2f} | {m('coverage80'):.0%} | {m('coverage80_clim'):.0%} | {m('mae_p50'):.1f} | {m('mae_clim_median'):.1f} | {m('mae_zero'):.1f} | {m('mae_persistence'):.1f} | {m('band_width'):.0f} |",
                       "", "Pinball loss is averaged over the 10th, 50th and 90th percentiles; lower is better. Coverage is the share of hours whose realized spread fell inside the P10–P90 band (target 80%)."]
         lines += ["", "A positive French net position means France exported into Core; Creys–St-Vulbas is France's export path and cannot bind on days when France imports."]
-        hit_sign_days = (np.sign(D.aft_p_pos - 0.5) == np.sign(D.aft_actual)).mean()
-        lines += ["", f"Afternoon-block sign hit rate: {hit_sign_days:.0%} over {len(D)} days; share of days with a positive afternoon spread: {(D.aft_actual > 0).mean():.0%}.", "",
+        Dv = D.dropna(subset=["aft_p_pos", "aft_actual"])
+        hit_sign_days = (np.sign(Dv.aft_p_pos - 0.5) == np.sign(Dv.aft_actual)).mean() if len(Dv) else float("nan")
+        lines += ["", f"Afternoon-block sign hit rate: {hit_sign_days:.0%} over {len(Dv)} days; share of days with a positive afternoon spread: {(Dv.aft_actual > 0).mean():.0%}.", "",
                   "## Reliability of P(bind)", "", "| Forecast bin | Hours | Mean forecast | Observed frequency |", "| --- | --- | --- | --- |"]
         H["bin"] = pd.cut(H.p_bind, [0, .2, .4, .6, .8, 1.0])
         for b, g in H.groupby("bin", observed=True):

@@ -104,3 +104,17 @@ def domain_published(day):
     f, t = day_bounds(day)
     rows, last_mod = _get("finalComputation", f, f + pd.Timedelta(minutes=60), {"Filter": json.dumps({"Presolved": True})}, take=1, single=True, retries=2, timeout=60)
     return len(rows) > 0, last_mod
+
+
+def day_complete(day, force=True):
+    """True when JAO has published the final domain and max net positions for every hour of the CET day.
+    Publication arrives over several minutes; a forecast issued on a partial day has NaN hours, so wait for the full set."""
+    f, t = day_bounds(day)
+    hours_expected = int((t - f) / pd.Timedelta(hours=1))
+    fc_rows, _ = fetch_day("finalComputation", day, force=force)
+    mx_rows, _ = fetch_day("maxNetPos", day, force=force)
+    if not fc_rows or not mx_rows:
+        return False
+    fc_hours = {r["dateTimeUtc"][:13] for r in fc_rows}
+    mx_hours = {r["dateTimeUtc"][:13] for r in mx_rows}
+    return len(fc_hours) >= hours_expected and len(mx_hours) >= hours_expected

@@ -53,6 +53,9 @@ def main():
     while True:
         try:
             ok, dom_mod = data.domain_published(day)
+            if ok and not data.day_complete(day):
+                print("domain for", day, "is still being published (not all hours yet); waiting", flush=True)
+                ok = False
         except Exception as e:  # JAO slow or unreachable: treat as not yet published and keep waiting
             ok, dom_mod = False, None
             print("JAO not answering (%s); will retry" % type(e).__name__, flush=True)
@@ -85,6 +88,9 @@ def main():
         print("domain data for", day, "incomplete")
         sys.exit(2)
     P = model.predict(bundle, X).sort_values("hour")
+    if P[["p_bind", "p_pos", "q50"]].isna().any().any() or len(P) < 23:
+        print("features incomplete for", day, "(NaN hours); not issuing", flush=True)
+        sys.exit(2)
     hours = [{"hour": int(r.hour), "p_bind": round(float(r.p_bind), 3), "p_de_above_fr": round(float(r.p_pos), 3), "e_spread": round(float(r.e_spread), 1),
               "spread_p10": round(float(r.q10), 1), "spread_p50": round(float(r.q50), 1), "spread_p90": round(float(r.q90), 1),
               "clim_q10": round(float(r.clim_q10), 1), "clim_q50": round(float(r.clim_q50), 1), "clim_q90": round(float(r.clim_q90), 1),

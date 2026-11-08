@@ -50,6 +50,9 @@ def score_day(day, fc):
     if len(R) < 20:
         return None
     H = pd.DataFrame(fc["hours"]).merge(R[["hour", "bind", "spread", "hub_FR"]], on="hour", how="inner").merge(Rprev, on="hour", how="left")
+    H = H.dropna(subset=["p_bind", "p_de_above_fr"])
+    if len(H) < 20:
+        status = "incomplete"  # issued on a partially published domain; kept but not counted
     y, s = H.bind.astype(int), (H.spread > 0).astype(int)
     out = {"day": day, "status": status, "issued_at_utc": fc["issued_at_utc"], "results_published_utc": results_pub, "n_hours": int(len(H)),
            "bind": {"actual_hours": int(y.sum()), "expected_hours": round(float(H.p_bind.sum()), 1), "brier": float(np.mean((H.p_bind - y) ** 2)),
@@ -87,17 +90,21 @@ def main():
         sys.exit(1 if verify() else 0)
     os.makedirs(os.path.join(ROOT, "scorecard"), exist_ok=True)
     log_fn = os.path.join(ROOT, "scorecard", "log.csv")
-    done = set(pd.read_csv(log_fn).day) if os.path.exists(log_fn) else set()
+    done = {os.path.basename(f)[:-5] for f in glob.glob(os.path.join(ROOT, "scorecard", "*.json"))}
     rows = []
     for fn in sorted(glob.glob(os.path.join(ROOT, "forecasts", "*.json"))):
         fc = json.load(open(fn))
         day = fc["day"]
         if day in done:
             continue
-        published, _ = data.results_published(day)
-        if not published:
+        try:
+            published, _ = data.results_published(day)
+            if not published:
+                continue
+            sc = score_day(day, fc)
+        except Exception as e:
+            print("could not score", day, "this run (%s); will retry next run" % type(e).__name__, flush=True)
             continue
-        sc = score_day(day, fc)
         if sc is None:
             continue
         json.dump(sc, open(os.path.join(ROOT, "scorecard", f"{day}.json"), "w"), indent=1)
@@ -108,8 +115,21 @@ def main():
                      "aft_p_pos": sc["afternoon_15_17"]["p_pos"], "aft_actual_pos": sc["afternoon_15_17"]["actual_pos"]})
         print("scored", day, "bind Brier %.3f hit %.2f | sign Brier %.3f hit %.2f | afternoon spread %.1f vs forecast %.1f" % (
             sc["bind"]["brier"], sc["bind"]["hit"], sc["sign"]["brier"], sc["sign"]["hit"], sc["afternoon_15_17"]["actual_spread"], sc["afternoon_15_17"]["forecast_spread"]))
+    rebuild_log()
+
+
+def rebuild_log():
+    """scorecard/log.csv is derived from the scorecard files, so it is rebuilt in full every run (columns may grow over time)."""
+    rows = []
+    for fn in sorted(glob.glob(os.path.join(ROOT, "scorecard", "*.json"))):
+        sc = json.load(open(fn)); q = sc.get("quantiles") or {}
+        rows.append({"day": sc["day"], "status": sc["status"], "issued_at_utc": sc.get("issued_at_utc"), "results_published_utc": sc.get("results_published_utc"),
+                     "bind_brier": sc["bind"]["brier"], "bind_hit": sc["bind"]["hit"], "bind_actual_hours": sc["bind"]["actual_hours"], "bind_expected_hours": sc["bind"]["expected_hours"],
+                     "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"], "aft_actual_spread": sc["afternoon_15_17"]["actual_spread"], "aft_p_pos": sc["afternoon_15_17"]["p_pos"],
+                     "pinball": q.get("pinball"), "pinball_clim": q.get("pinball_clim"), "coverage80": q.get("coverage80"), "mae_p50": q.get("mae_p50"), "mae_persistence": q.get("mae_persistence"),
+                     "fr_net_position_mean": sc.get("fr_net_position_mean")})
     if rows:
-        pd.DataFrame(rows).to_csv(log_fn, mode="a", header=not os.path.exists(log_fn), index=False)
+        pd.DataFrame(rows).to_csv(os.path.join(ROOT, "scorecard", "log.csv"), index=False)
 
 
 if __name__ == "__main__":
