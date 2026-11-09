@@ -1,6 +1,6 @@
 # Scorecard: Core binding-constraint forecast
 
-Last scoring run: 2026-11-08 18:25 UTC. All published days scored.
+Last scoring run: 2026-11-09 10:43 UTC. All published days scored.
 
 Forecasts are issued each morning for the next CET day from the published JAO domain, before the day-ahead auction closes; only forecasts whose issue time precedes the publication of the results count (status `ex-ante`). Metrics compare each forecast with the hour-of-day climatology of the training window.
 
