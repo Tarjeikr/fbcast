@@ -9,6 +9,46 @@ Nothing from D's own auction is used.
 import glob, json
 import numpy as np, pandas as pd
 
+BLOCKS = {"night 00–05": (0, 5), "morning 06–09": (6, 9), "midday 10–14": (10, 14), "afternoon 15–17": (15, 17), "evening 18–20": (18, 20), "late 21–23": (21, 23)}
+# Daily products. Peak = delivery 08:00-21:00 CET (hours beginning 08 to 20) on all seven days; set PEAK_WEEKDAYS_ONLY = True for exchange-style Mon-Fri peak.
+PEAK_HOURS = tuple(range(8, 21))
+PEAK_WEEKDAYS_ONLY = False
+PRODUCT_MIN_HOURS = {"base": 20, "peak": 11}  # fewer hours than this (partial days) and the product is not scored
+
+
+def product_hours(name):
+    return tuple(range(24)) if name == "base" else PEAK_HOURS
+
+
+def product_applies(name, day):
+    if name == "peak" and PEAK_WEEKDAYS_ONLY and day is not None:
+        return pd.Timestamp(day).weekday() < 5
+    return True
+
+
+def _p_pos(p10, p50, p90):
+    """P(daily mean > 0) from a normal approximation whose width is read off the P10-P90 band (floor 1 EUR/MWh)."""
+    from math import erf, sqrt
+    sigma = max((p90 - p10) / 2.5631, 1.0)
+    return 0.5 * (1 + erf(p50 / (sigma * sqrt(2))))
+
+
+def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_p90")):
+    """Daily base (24 h) and peak spread forecast from hourly quantiles: the average of the hourly P10, P50 and P90 over the product's hours
+    (exact if the hourly errors move together, which they largely do within a day), plus P(mean > 0)."""
+    out = {}
+    for name in ("base", "peak"):
+        if not product_applies(name, day):
+            continue
+        vals = [[h.get(k) for k in keys] for h in hours if h["hour"] in product_hours(name)]
+        vals = [v for v in vals if all(x is not None and x == x for x in v)]
+        if len(vals) < PRODUCT_MIN_HOURS[name]:
+            continue
+        a = np.mean(vals, axis=0)
+        out[name] = {"p10": float(a[0]), "p50": float(a[1]), "p90": float(a[2]), "p_pos": float(_p_pos(a[0], a[1], a[2])), "n_hours": len(vals)}
+    return out
+
+
 CREYS2 = ("L 400kV N0 2 CREYS-ST-VULBAS-OUEST", "OPPOSITE")
 CREYS1 = ("L 400kV N0 1 CREYS-ST-VULBAS-OUEST", "OPPOSITE")
 TZ = "Europe/Berlin"

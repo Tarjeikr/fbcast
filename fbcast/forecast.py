@@ -10,7 +10,7 @@ import argparse, hashlib, json, os, sys, time
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fbcast import data, model
-from fbcast.features import domain_features, maxnp_features
+from fbcast.features import domain_features, maxnp_features, BLOCKS, product_forecast
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,7 +32,7 @@ def rebuild_log():
     rows = []
     for fn in sorted(glob.glob(os.path.join(ROOT, "forecasts", "*.json"))):
         f = json.load(open(fn))
-        rows.append({"day": f["day"], "issued_at_utc": f["issued_at_utc"], "status": f["status"], **f["summary"]})
+        rows.append({"day": f["day"], "issued_at_utc": f["issued_at_utc"], "status": f["status"], **{k: v for k, v in f["summary"].items() if k not in ("blocks", "products")}})
     if rows:
         pd.DataFrame(rows).to_csv(os.path.join(ROOT, "forecasts", "log.csv"), index=False)
 
@@ -98,6 +98,11 @@ def main():
               "maxFR": round(float(r.maxFR)), "minFR": round(float(r.minFR))} for r in P.itertuples()]
     aft = P[P.hour.isin([15, 16, 17])]
     night = P[P.hour.isin([21, 22, 23])]
+    blocks = {}
+    for name, (a, b) in BLOCKS.items():
+        B = P[(P.hour >= a) & (P.hour <= b)]
+        blocks[name] = {"expected_binding_hours": round(float(B.p_bind.sum()), 1), "p_de_above_fr": round(float(B.p_pos.mean()), 3),
+                        "spread_p10": round(float(B.q10.mean()), 1), "spread_p50": round(float(B.q50.mean()), 1), "spread_p90": round(float(B.q90.mean()), 1)}
     fc = {"day": day, "issued_at_utc": issued_at.isoformat(), "status": status,
           "domain_published_utc": dom_mod, "results_published_utc": res_mod,
           "model": {"trained_at": bundle.get("trained_at"), "train_days": bundle.get("train_days"), "bundle_sha256": model_sha, "rules": model.RULES},
@@ -105,8 +110,13 @@ def main():
                       "p_de_above_fr_afternoon_15_17": round(float(aft.p_pos.mean()), 3),
                       "spread_p50_afternoon_15_17": round(float(aft.q50.mean()), 1), "spread_p10_afternoon_15_17": round(float(aft.q10.mean()), 1), "spread_p90_afternoon_15_17": round(float(aft.q90.mean()), 1),
                       "p_de_above_fr_night_21_23": round(float(night.p_pos.mean()), 3), "spread_p50_day": round(float(P.q50.mean()), 1),
-                      "creys_min_ram": None if P.c2_ram.isna().all() else round(float(P.c2_ram.min())), "fr_max_export": round(float(P.maxFR.max()))},
+                      "creys_min_ram": None if P.c2_ram.isna().all() else round(float(P.c2_ram.min())), "fr_max_export": round(float(P.maxFR.max())), "blocks": blocks},
           "hours": hours}
+    prod = product_forecast(hours, day)
+    fc["summary"]["products"] = {k: {kk: (round(vv, 3) if kk == "p_pos" else round(vv, 1) if isinstance(vv, float) else vv) for kk, vv in v.items()} for k, v in prod.items()}
+    for k in ("base", "peak"):
+        fc["summary"][f"{k}_spread_p50"] = round(prod[k]["p50"], 1) if k in prod else None
+        fc["summary"][f"p_{k}_above_zero"] = round(prod[k]["p_pos"], 3) if k in prod else None
     os.makedirs(os.path.join(ROOT, "forecasts"), exist_ok=True)
     json.dump(fc, open(out_fn, "w"), indent=1)
     rebuild_log()

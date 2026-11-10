@@ -6,9 +6,13 @@ import glob, json, os, sys
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fbcast import data
-from fbcast.features import realized
+from fbcast.features import realized, product_forecast, product_hours, PRODUCT_MIN_HOURS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _f(v):
+    return None if v is None or pd.isna(v) else round(float(v), 2)
 
 
 def _pinball(y, q, tau):
@@ -30,6 +34,24 @@ def quantile_scores(H):
            "afternoon_p50": float(aft.spread_p50.mean()), "afternoon_p10": float(aft.spread_p10.mean()), "afternoon_p90": float(aft.spread_p90.mean())}
     if H.spread_prev.notna().any():
         out["mae_persistence"] = float(np.mean(np.abs(H.spread - H.spread_prev.fillna(0))))
+    return out
+
+
+def product_scores(H, day):
+    """Daily base and peak: the forecast issued (average of hourly quantiles), the climatological equivalent, yesterday's value and the outcome."""
+    rows = H.to_dict("records")
+    f = product_forecast(rows, day)
+    c = product_forecast(rows, day, keys=("clim_q10", "clim_q50", "clim_q90"))
+    out = {}
+    for name, v in f.items():
+        X = H[H.hour.isin(product_hours(name))]
+        if len(X) < PRODUCT_MIN_HOURS[name]:
+            continue
+        d = {k: round(x, 2) if isinstance(x, float) else x for k, x in v.items()}
+        d.update({"actual": round(float(X.spread.mean()), 2), "n_actual": int(len(X)),
+                  "clim_p50": round(c[name]["p50"], 2) if name in c else None, "clim_p_pos": round(c[name]["p_pos"], 3) if name in c else None,
+                  "prev_actual": round(float(X.spread_prev.mean()), 2) if X.spread_prev.notna().sum() >= PRODUCT_MIN_HOURS[name] else None})
+        out[name] = d
     return out
 
 
@@ -64,7 +86,10 @@ def score_day(day, fc, prices=None):
                                "p_bind": float(H[H.hour.isin([15, 16, 17])].p_bind.mean()), "actual_bind": float(H[H.hour.isin([15, 16, 17])].bind.mean())},
            "fr_net_position_mean": float(H.hub_FR.mean()) if H.hub_FR.notna().any() else None,
            "quantiles": quantile_scores(H),
-           "hours": [{"hour": int(r.hour), "p_bind": r.p_bind, "bind": int(r.bind), "p_de_above_fr": r.p_de_above_fr, "spread": round(float(r.spread), 1), "e_spread": r.e_spread} for r in H.itertuples()]}
+           "products": product_scores(H, day) if status != "incomplete" else {},
+           "hours": [{"hour": int(r.hour), "p_bind": r.p_bind, "bind": int(r.bind), "p_de_above_fr": r.p_de_above_fr, "spread": round(float(r.spread), 1), "e_spread": r.e_spread,
+                      "p10": _f(getattr(r, "spread_p10", None)), "p50": _f(getattr(r, "spread_p50", None)), "p90": _f(getattr(r, "spread_p90", None)),
+                      "clim_q10": _f(getattr(r, "clim_q10", None)), "clim_q50": _f(getattr(r, "clim_q50", None)), "clim_q90": _f(getattr(r, "clim_q90", None))} for r in H.itertuples()]}
     return out
 
 
@@ -134,7 +159,8 @@ def rebuild_log():
                      "bind_brier": sc["bind"]["brier"], "bind_hit": sc["bind"]["hit"], "bind_actual_hours": sc["bind"]["actual_hours"], "bind_expected_hours": sc["bind"]["expected_hours"],
                      "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"], "aft_actual_spread": sc["afternoon_15_17"]["actual_spread"], "aft_p_pos": sc["afternoon_15_17"]["p_pos"],
                      "pinball": q.get("pinball"), "pinball_clim": q.get("pinball_clim"), "coverage80": q.get("coverage80"), "mae_p50": q.get("mae_p50"), "mae_persistence": q.get("mae_persistence"),
-                     "fr_net_position_mean": sc.get("fr_net_position_mean")})
+                     "fr_net_position_mean": sc.get("fr_net_position_mean"),
+                     **{f"{k}_{f}": (sc.get("products") or {}).get(k, {}).get(f) for k in ("base", "peak") for f in ("p50", "p_pos", "actual")}})
     if rows:
         pd.DataFrame(rows).to_csv(os.path.join(ROOT, "scorecard", "log.csv"), index=False)
 
