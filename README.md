@@ -25,8 +25,17 @@ excluded from the scorecard.
   regressions on the same information set. The median is the level forecast; the P10–P90 band is a forecast of how wide
   the hour's outcome can be. (`e_spread`, a mean-regression value, is kept in the files for continuity; it has no skill.)
 
-Daily summaries: expected number of binding hours, the 15–17 CET block (where the German premium is made) with its
-sign probability and P50/P10/P90, and the 21–23 CET block.
+All of these are issued for every hour of the CET day. Each forecast file also carries a summary per block of the day (night
+00–05, morning 06–09, midday 10–14, afternoon 15–17, evening 18–20, late 21–23): expected binding hours, probability of
+Germany above France, and the mean P50 with its P10–P90 band. `SCORECARD.md` shows the latest forecast hour by hour (chart
+and table), the last scored day against its outcome, and each block's skill against climatology once the block has 7 counted
+days.
+
+Where the skill sits (backtests, two held-out windows): the probability of Germany above France beats climatology in every
+block except late evening, where it is level; the spread level (P50) is clearly better than climatology only at night
+(about 20% lower pinball loss) and roughly level elsewhere; and the 80% bands under-cover in the volatile hours (39–57%
+at midday and in the afternoon, 62–85% elsewhere). The live scorecard reports coverage by block so the bands can be
+recalibrated on real out-of-sample days rather than on the backtest.
 
 ## Model
 
@@ -64,6 +73,27 @@ The binding model's skill comes from the published loading of the line (Fref/Fma
 top-up; the sign model's skill comes from the same variables plus the French export room. The level of the spread is
 only weakly forecastable from this information set: the median beats the climatological median and a zero forecast
 by about 10% and persistence by more than 40%, and the band is honest about the rest.
+
+## Base and peak
+
+Besides the hourly forecasts, every forecast and the scorecard carry the two products a spread is quoted in: **base**, the average
+DE−FR day-ahead spread over all 24 hours, and **peak**, the average over delivery 08:00–21:00 CET (hours beginning 08 to 20, every
+day of the week; set `PEAK_WEEKDAYS_ONLY = True` in `fbcast/features.py` for an exchange-style Monday to Friday peak).
+
+The forecast of each product is the average of the hourly P10, P50 and P90 over its hours, which is exact when the hourly errors
+move together (they largely do within a day) and slightly too narrow otherwise. `P(spread > 0)` is read off that band with a normal
+approximation (width from P10–P90, floor €1/MWh). Each forecast file records both under `summary.products`; the scorecard compares
+them with the realized product, with the hour-of-day climatology aggregated the same way, and with yesterday's realized value.
+
+Backtest (trained to 18 Oct, tested on 18 days; the 32 days from 4 Oct give the same picture with narrower bands):
+
+| 18 held-out days, €/MWh | P50 error | Constant (training median) | Yesterday's value | 80% band coverage | Sign hit | Sign Brier | Sign Brier, climatology |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Base | 16.8 | 19.5 | 28.5 | 72% | 78% | 0.200 | 0.253 |
+| Peak | 24.9 | 27.3 | 40.6 | 67% | 78% | 0.201 | 0.250 |
+
+The level beats a constant by 10–15% and yesterday's value by about 40%, the sign probability is clearly better than climatology,
+and the bands cover 50–72% of outcomes rather than 80%, so treat the width as a lower bound until the live scorecard says otherwise.
 
 ## Running it
 
