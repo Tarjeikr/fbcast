@@ -1,6 +1,6 @@
 # Scorecard: Core binding-constraint forecast
 
-Last scoring run: 2026-11-14 18:48 UTC. All published days scored.
+Last scoring run: 2026-11-15 09:44 UTC. All published days scored.
 
 
 ## Latest forecast: 2026-11-15
