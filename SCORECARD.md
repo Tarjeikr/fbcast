@@ -1,54 +1,54 @@
 # Scorecard: Core binding-constraint forecast
 
-Last scoring run: 2026-11-15 19:26 UTC. All published days scored.
+Last scoring run: 2026-11-16 22:57 UTC. All published days scored.
 
 
-## Latest forecast: 2026-11-16
+## Latest forecast: 2026-11-17
 
 ![Latest forecast, hour by hour](scorecard/chart_forecast.png)
 
 | Product | P(spread > 0) | P50 (P10 to P90), €/MWh |
 | --- | --- | --- |
-| Base (24 h) | 0.34 | -6.0 (-27.0 to +10.3) |
-| Peak (08–21) | 0.36 | -6.0 (-27.7 to +13.7) |
+| Base (24 h) | 0.59 | +6.6 (-9.3 to +66.5) |
+| Peak (08–21) | 0.58 | +6.4 (-11.1 to +66.7) |
 
 | Block | Expected binding hours | P(DE > FR) | Spread P50 (P10 to P90), €/MWh |
 | --- | --- | --- | --- |
-| night 00–05 | 0.7 | 0.07 | -6 (-26 to +8) |
-| morning 06–09 | 0.3 | 0.11 | -8 (-30 to +5) |
-| midday 10–14 | 0.7 | 0.10 | -7 (-31 to +13) |
-| afternoon 15–17 | 0.8 | 0.23 | -3 (-22 to +28) |
-| evening 18–20 | 0.2 | 0.12 | -6 (-28 to +4) |
-| late 21–23 | 0.3 | 0.09 | -4 (-22 to +5) |
+| night 00–05 | 3.8 | 0.75 | +8 (-5 to +74) |
+| morning 06–09 | 2.9 | 0.86 | +12 (+0 to +78) |
+| midday 10–14 | 3.4 | 0.78 | +9 (-11 to +81) |
+| afternoon 15–17 | 2.3 | 0.78 | +9 (-10 to +86) |
+| evening 18–20 | 0.7 | 0.30 | -2 (-18 to +24) |
+| late 21–23 | 0.7 | 0.35 | -1 (-18 to +34) |
 
 <details><summary>Hour by hour</summary>
 
 | Hour (CET) | P(bind) | P(DE > FR) | P10 | P50 | P90 |
 | --- | --- | --- | --- | --- | --- |
-| 00 | 0.05 | 0.05 | -30 | -7 | +1 |
-| 01 | 0.07 | 0.06 | -26 | -6 | +3 |
-| 02 | 0.12 | 0.07 | -25 | -5 | +8 |
-| 03 | 0.11 | 0.07 | -25 | -6 | +8 |
-| 04 | 0.16 | 0.09 | -24 | -5 | +13 |
-| 05 | 0.20 | 0.08 | -25 | -4 | +16 |
-| 06 | 0.10 | 0.06 | -31 | -9 | +6 |
-| 07 | 0.03 | 0.03 | -36 | -10 | -2 |
-| 08 | 0.20 | 0.32 | -15 | -2 | +18 |
-| 09 | 0.02 | 0.01 | -39 | -11 | -2 |
-| 10 | 0.28 | 0.36 | -24 | -3 | +29 |
-| 11 | 0.07 | 0.02 | -37 | -10 | +5 |
-| 12 | 0.06 | 0.02 | -35 | -10 | +5 |
-| 13 | 0.12 | 0.03 | -32 | -8 | +11 |
-| 14 | 0.18 | 0.06 | -28 | -6 | +16 |
-| 15 | 0.51 | 0.59 | -13 | +4 | +54 |
-| 16 | 0.26 | 0.08 | -24 | -5 | +25 |
-| 17 | 0.07 | 0.03 | -30 | -9 | +5 |
-| 18 | 0.01 | 0.02 | -34 | -9 | -2 |
-| 19 | 0.00 | 0.02 | -35 | -7 | -1 |
-| 20 | 0.14 | 0.33 | -16 | -2 | +15 |
-| 21 | 0.06 | 0.09 | -24 | -6 | +4 |
-| 22 | 0.07 | 0.09 | -22 | -4 | +4 |
-| 23 | 0.11 | 0.11 | -21 | -3 | +8 |
+| 00 | 0.64 | 0.73 | -9 | +7 | +67 |
+| 01 | 0.71 | 0.79 | -5 | +9 | +73 |
+| 02 | 0.81 | 0.88 | -2 | +12 | +85 |
+| 03 | 0.35 | 0.56 | -12 | +2 | +56 |
+| 04 | 0.40 | 0.60 | -11 | +3 | +62 |
+| 05 | 0.94 | 0.95 | +6 | +16 | +101 |
+| 06 | 0.89 | 0.96 | +4 | +15 | +98 |
+| 07 | 0.75 | 0.93 | +4 | +14 | +83 |
+| 08 | 0.59 | 0.78 | -1 | +10 | +64 |
+| 09 | 0.64 | 0.76 | -7 | +9 | +69 |
+| 10 | 0.76 | 0.86 | -6 | +11 | +85 |
+| 11 | 0.75 | 0.84 | -9 | +10 | +85 |
+| 12 | 0.72 | 0.81 | -11 | +9 | +81 |
+| 13 | 0.77 | 0.82 | -10 | +10 | +89 |
+| 14 | 0.39 | 0.56 | -17 | +2 | +65 |
+| 15 | 0.78 | 0.79 | -10 | +9 | +88 |
+| 16 | 0.81 | 0.81 | -9 | +9 | +92 |
+| 17 | 0.69 | 0.74 | -11 | +7 | +78 |
+| 18 | 0.40 | 0.52 | -13 | +2 | +42 |
+| 19 | 0.17 | 0.21 | -19 | -3 | +18 |
+| 20 | 0.13 | 0.16 | -22 | -4 | +12 |
+| 21 | 0.17 | 0.38 | -20 | -2 | +36 |
+| 22 | 0.17 | 0.33 | -20 | -2 | +35 |
+| 23 | 0.33 | 0.33 | -15 | +1 | +32 |
 
 </details>
 
@@ -73,9 +73,9 @@ Forecasts are issued each morning for the next CET day from the published JAO do
 
 | Window | Hours | Days | Bind Brier | Bind Brier, climatology | Bind hit | Bind hit, climatology | Sign Brier | Sign Brier, climatology | Sign hit | Sign hit, climatology |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| All ex-ante forecasts | 144 | 6 | 0.163 | 0.214 | 79% | 67% | 0.206 | 0.273 | 69% | 59% |
-| Last 14 days | 144 | 6 | 0.163 | 0.214 | 79% | 67% | 0.206 | 0.273 | 69% | 59% |
-| Afternoon hours 13–19 CET | 42 | 6 | 0.133 | 0.230 | 79% | 57% | 0.149 | 0.235 | 74% | 64% |
+| All ex-ante forecasts | 144 | 6 | 0.163 | 0.209 | 79% | 67% | 0.206 | 0.268 | 69% | 59% |
+| Last 14 days | 144 | 6 | 0.163 | 0.209 | 79% | 67% | 0.206 | 0.268 | 69% | 59% |
+| Afternoon hours 13–19 CET | 42 | 6 | 0.133 | 0.216 | 79% | 57% | 0.149 | 0.234 | 74% | 64% |
 
 ## By day: afternoon block 15–17 CET and binding hours
 
@@ -112,7 +112,7 @@ Afternoon-block sign hit rate: 83% over 6 days; share of days with a positive af
 
 ## Model and backtest
 
-Logistic models on the D-1 published Core domain (Creys–St-Vulbas RAM, loading and minRAM top-up, French max net positions) plus hour-of-day climatology; trained on 2026-09-01 to 2026-11-08 (1655 hour-rows). Held-out backtest 2026-10-22 to 2026-11-08: binding AUC 0.84, Brier 0.139 vs 0.187 climatology; sign AUC 0.87, Brier 0.132 vs 0.202; spread quantiles pinball 5.84 vs 6.44 climatology, P50 MAE 16.4 vs 16.8 for a zero forecast.
+Logistic models on the D-1 published Core domain (Creys–St-Vulbas RAM, loading and minRAM top-up, French max net positions) plus hour-of-day climatology; trained on 2026-09-01 to 2026-11-15 (1823 hour-rows). Held-out backtest 2026-10-29 to 2026-11-15: binding AUC 0.88, Brier 0.124 vs 0.178 climatology; sign AUC 0.84, Brier 0.184 vs 0.233; spread quantiles pinball 7.32 vs 7.72 climatology, P50 MAE 20.4 vs 20.5 for a zero forecast.
 
 ## Last scored day: 2026-11-16
 
