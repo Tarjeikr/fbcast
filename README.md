@@ -22,11 +22,11 @@ timestamps and marks a forecast `late` if the results already exist. Late foreca
 Each file also records gate closure and whether it was issued before it (`issued_before_gate_closure`); the scorecard reports
 that count separately.
 
-**Scheduling.** GitHub starts scheduled workflows late: every scheduled run of this repository from 4 to 18 November 2026 began
+**Scheduling.** GitHub starts scheduled workflows late: every scheduled run of this repository from 4 to 19 November 2026 began
 4.5 to 10.5 hours after its cron time, so the forecasts of those weeks that count are the ones started by hand. The forecast
-workflow therefore has a slot every 30 minutes from 21:07 to 11:37 CET. Whatever the delay, several runs start between the
-publication of the domain and gate closure; a run that starts before 09:00 CET, or after the day's forecast exists, stops at
-its first step.
+workflow therefore has a slot every 30 minutes from 21:07 to 11:37 CET, and a run does not have to start at the right moment:
+any run that starts between 07:30 CET and gate closure waits for JAO to publish the domain and then issues. A run that starts
+before 07:30 CET, or after the day's forecast exists, stops at its first step.
 
 ## What is forecast, per hour of day D
 
