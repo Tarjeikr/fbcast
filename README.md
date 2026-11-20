@@ -1,12 +1,15 @@
 # fbcast: a daily, public day-ahead forecast for the Core region
 
-Every morning this repository forecasts the next CET day in the Core flow-based region, hour by hour: the DE−FR day-ahead
-spread with a P10–P90 band, the probability that Germany prices above France, the German and French prices, and the hours in
-which the Core domain's most price-relevant French constraint (RTE's Creys–St-Vulbas Ouest 400 kV line) will bind. The forecast
-is issued before the 12:00 CET auction closes and committed to this repository; the next afternoon it is scored against the
-published results. The commit history is the track record, and nothing in it is edited afterwards.
+Every morning this repository forecasts tomorrow's German and French day-ahead prices, base and peak, and the DE−FR spread
+between them, each with a P10–P90 band. The forecast is issued before the 12:00 CET auction closes and committed to this
+repository; the next afternoon it is scored against the prices that cleared. The commit history is the track record, and
+nothing in it is edited afterwards.
 
-`SCORECARD.md` is rebuilt after every scoring run and is the place to look first.
+`SCORECARD.md` is rebuilt after every scoring run and is the place to look first: tomorrow's forecast, the record so far
+against simply repeating yesterday's price, and every day's forecast next to the outcome.
+
+Behind the six daily numbers each forecast file carries the hour-by-hour detail, including the probability that the Core
+flow-based domain's most price-relevant French constraint (RTE's Creys–St-Vulbas Ouest 400 kV line) will bind.
 
 ## Information set and timing
 
@@ -28,19 +31,28 @@ workflow therefore has a slot every 30 minutes from 21:07 to 11:37 CET, and a ru
 any run that starts between 07:30 CET and gate closure waits for JAO to publish the domain and then issues. A run that starts
 before 07:30 CET, or after the day's forecast exists, stops at its first step.
 
-## What is forecast, per hour of day D
+## What is forecast
 
+**Six daily products** (`summary.daily` in each forecast file), each as P10, P50 and P90 in €/MWh:
+
+| | Base: all hours of the CET day | Peak: Monday to Friday, 08:00–20:00 CET |
+| --- | --- | --- |
+| DE-LU day-ahead price | `DE_base` | `DE_peak` |
+| FR day-ahead price | `FR_base` | `FR_peak` |
+| DE−FR spread | `spread_base` | `spread_peak` |
+
+Base and peak follow the exchange definitions, so there is no peak product on a Saturday or Sunday. A daily forecast is the
+average of the hourly percentiles over the product's hours, with a band calibrated on the model's own daily errors (below).
+
+**Per hour of day D** (`hours`):
+
+* `de_p10/p50/p90` and `fr_p10/p50/p90`: percentiles of the DE-LU and FR day-ahead prices.
+* `spread_p10`, `spread_p50`, `spread_p90`: percentiles of the DE−FR spread; `p_de_above_fr`: probability that DE clears above FR.
 * `p_bind`: probability that Creys–St-Vulbas Ouest (either circuit) carries a positive shadow price in the hour.
-* `p_de_above_fr`: probability that the DE–LU day-ahead price exceeds the FR price in the hour.
-* `spread_p10`, `spread_p50`, `spread_p90`: the 10th, 50th and 90th percentiles of the DE−FR spread in €/MWh.
-* `de_p10/p50/p90` and `fr_p10/p50/p90`: the same percentiles of the DE–LU and FR day-ahead prices.
-* `grid_p_de_above_fr`, `grid_p10/p50/p90`: the grid-only model's spread forecast for the same hour, kept so that the two models are
-  scored on identical hours.
+* `grid_p_de_above_fr`, `grid_p10/p50/p90`: the grid-only model's spread forecast for the same hour, kept as a comparator.
 
-Each file also carries a summary per block of the day and the two products a spread is quoted in: **base**, the average DE−FR
-spread over all 24 hours, and **peak**, the average over delivery 08:00–21:00 CET (hours beginning 08 to 20, every day of the week;
-set `PEAK_WEEKDAYS_ONLY = True` in `fbcast/features.py` for an exchange-style Monday to Friday peak). `model.spread_model` says
-which model produced the spread forecast: `fundamentals`, or `grid` on a day when the fundamentals inputs were not on JAO in time.
+`model.spread_model` says which model produced the prices and the spread: `fundamentals`, or `grid` on a day when the
+fundamentals inputs were not on JAO in time. A `grid` day carries no price forecast and is not part of the record.
 
 ## Two models
 
@@ -59,7 +71,7 @@ Backtest (strict time split, trained to 18 Oct, tested 19 Oct–5 Nov 2026, 432 
 The grid model knows the network and nothing else. It cannot see a tight German system or a long French one, and in the week
 of 17 November 2026, when the DE−FR base spread reached +147 and +164 €/MWh, its median stayed between +3 and +13.
 
-### Fundamentals model: how far apart will the prices clear?
+### Fundamentals model: where will the prices clear?
 
 Gradient-boosted quantile regressions (scikit-learn `HistGradientBoostingRegressor`, one per percentile and target) and a
 gradient-boosted classifier for the sign, fitted on every hour since Core flow-based market coupling started in June 2022.
@@ -83,30 +95,36 @@ difference when the price level moved in November 2026. Prices are modelled raw;
 
 **Band calibration.** Raw quantile regressions under-cover. Every retrain therefore measures, on its own out-of-sample
 walk-forward errors of the last 90 days, how wide each half of the band should have been to hold 80% of outcomes, and stores
-those factors with the model (`model.fund.band_factors` in each forecast). Daily base and peak bands get their own factors from
-180 days of daily errors (`model.product_cal`), because averaging hourly bands overstates the uncertainty of a daily mean.
+those factors with the model (`model.fund.band_factors` in each forecast). Each of the six daily products gets its own factors
+from 180 days of daily errors (`model.product_cal`), because averaging hourly bands overstates the uncertainty of a daily mean.
 
 ### Backtest of the fundamentals model
 
-Walk-forward with monthly refits, 1 November 2025 to 20 November 2026 (385 days, 9,239 hours). Every prediction comes from a
-model that had seen nothing from its own month.
+Walk-forward with monthly refits, 1 November 2025 to 19 November 2026 (384 days). Every prediction comes from a model that had
+seen nothing from its own month. The benchmark for a daily product is its last delivered price: yesterday's for base, the
+previous weekday's for peak.
 
-| Hourly DE−FR spread | Fundamentals model | Climatology, last 60 days | Yesterday's value | Zero |
+| Daily product | Days | Average price, €/MWh | P50 error, €/MWh | Error of yesterday's price | Outcomes inside the P10–P90 band |
+| --- | --- | --- | --- | --- | --- |
+| DE base | 384 | 118 | 13.8 | 26.6 | 82% |
+| DE peak | 274 | 119 | 18.7 | 33.0 | 80% |
+| FR base | 384 | 92 | 15.4 | 21.6 | 79% |
+| FR peak | 274 | 90 | 20.1 | 26.5 | 79% |
+| DE−FR base | 384 | +26 | 11.8 | 17.6 | 79% |
+| DE−FR peak | 274 | +29 | 16.0 | 26.1 | 78% |
+
+The band figures use the calibration a live forecast would have had at each date (factors from earlier days only). The spread's
+sign was right on 90% of days for base and 88% for peak.
+
+| Hourly DE−FR spread, 9,215 hours | Fundamentals model | Climatology, last 60 days | Yesterday's value | Zero |
 | --- | --- | --- | --- | --- |
-| Pinball loss (mean of P10, P50, P90) | 5.87 | 8.74 | — | — |
-| P50 absolute error, €/MWh | 17.4 | 26.8 | 25.3 | 31.0 |
-| Sign: Brier score | 0.108 | 0.192 | — | — |
+| Pinball loss (mean of P10, P50, P90) | 5.83 | 8.67 | — | — |
+| P50 absolute error, €/MWh | 17.3 | 26.7 | 25.2 | 30.8 |
+| Sign: Brier score | 0.107 | 0.192 | — | — |
 | Sign: hit rate | 85% | 72% | — | — |
 
-| Daily products and prices, P50 error in €/MWh | Fundamentals model | Yesterday's value | Climatology |
-| --- | --- | --- | --- |
-| Base spread (sign right on 90% of days) | 11.8 | 17.8 | 21.7 |
-| Peak spread (sign right on 89% of days) | 14.3 | 23.5 | 24.2 |
-| DE price, hourly (mean price 120) | 19.7 | 31.9 | — |
-| FR price, hourly (mean price 93) | 21.4 | 27.9 | — |
-
-Coverage of the 80% band: 71% of hours raw; 77% of hours, 79% of daily base and 77% of daily peak outcomes with the calibration a
-live forecast would have had at each date (factors from earlier days only). The bands are still a little narrow.
+Hourly prices: P50 error 19.7 €/MWh for DE against 32.0 for yesterday's price at the same hour, and 21.2 against 27.8 for FR.
+The hourly 80% bands covered 71% of hours raw and 77% with the calibration; they are still a little narrow.
 
 ### Both models on the same days
 
@@ -133,10 +151,13 @@ year, and still surprised by a regime it had not seen.
 
 ## The live record
 
-Version 1 (grid model only) issued the forecasts from 4 November 2026. Version 2 adds the fundamentals model from the first
-forecast after the retrain that introduced it; each file states its version. `SCORECARD.md` reports the spread forecast by
-model of record, both models on the same days, the price forecasts against yesterday's price, and how many counted forecasts
-were issued before gate closure.
+The record on `SCORECARD.md` starts with the first forecast issued by the fundamentals model and counts a forecast only if it
+was issued before the results were published. For each of the six daily products it reports the P50 error next to the error
+of repeating the last delivered price, and how often the outcome fell inside the band.
+
+Forecasts issued from 4 November 2026 by the first, grid-only version of this project remain in `forecasts/` and
+`scorecard/`, unedited, and are not part of that record. `python -m fbcast.report --full` writes the hourly diagnostics for
+all versions (spread and binding skill against climatology, by block and by model) to `scorecard/DIAGNOSTICS.md`.
 
 ## The book: calls priced against the market
 
@@ -156,7 +177,7 @@ pip install -r requirements.txt
 python -m fbcast.train                      # grid model from 1 Sep 2026; fundamentals model from June 2022 with a 12-month walk-forward
 python -m fbcast.forecast --wait-minutes 45 # issues tomorrow's forecast once the domain is on JAO
 python -m fbcast.score                      # scores every issued forecast whose results are published
-python -m fbcast.report                     # rewrites SCORECARD.md
+python -m fbcast.report                     # rewrites SCORECARD.md (add --full for the hourly diagnostics)
 ```
 
 The first training run downloads about 4,000 two-day windows from JAO (ten minutes or so) and five years of prices; they are
