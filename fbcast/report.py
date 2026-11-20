@@ -62,14 +62,22 @@ def main():
         if sc["status"] != "ex-ante":
             continue
         for h in sc["hours"]:
-            hours.append({"day": sc["day"], **h})
-        days.append({"day": sc["day"], "bind_brier": sc["bind"]["brier"], "bind_hit": sc["bind"]["hit"], "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"],
+            hours.append({"day": sc["day"], "sm": sc.get("spread_model", "grid"), **h})
+        pre_gate = sc.get("issued_before_gate_closure")
+        if pre_gate is None:  # scorecards written before the field existed: gate closure is 12:00 CET on the day before delivery
+            pre_gate = bool(pd.Timestamp(sc["issued_at_utc"]) < (pd.Timestamp(sc["day"]) - pd.Timedelta(hours=12)).tz_localize("Europe/Berlin").tz_convert("UTC"))
+        days.append({"day": sc["day"], "sm": sc.get("spread_model", "grid"), "levels": sc.get("levels"), "grid": sc.get("grid_only"), "pre_gate": pre_gate,
+                     "bind_brier": sc["bind"]["brier"], "bind_hit": sc["bind"]["hit"], "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"],
                      "aft_actual": sc["afternoon_15_17"]["actual_spread"], "aft_p_pos": sc["afternoon_15_17"]["p_pos"],
                      "bind_actual_hours": sc["bind"]["actual_hours"], "bind_expected_hours": sc["bind"]["expected_hours"],
                      "fr_np": sc.get("fr_net_position_mean"), "q": sc.get("quantiles"), "prod": sc.get("products") or {}})
     H = pd.DataFrame()
-    lines = ["# Scorecard: Core binding-constraint forecast", "", "Forecasts are issued each morning for the next CET day from the published JAO domain, before the day-ahead auction closes; "
+    lines = ["# Scorecard: Core day-ahead forecast (DE–FR spread, DE and FR prices, Creys–St-Vulbas binding)", "",
+             "Forecasts are issued each morning for the next CET day from what JAO has published by then, before the day-ahead auction closes; "
              "only forecasts whose issue time precedes the publication of the results count (status `ex-ante`). Metrics compare each forecast with the hour-of-day climatology of the training window.", ""]
+    if days:
+        n_pre = sum(1 for d in days if d["pre_gate"])
+        lines += [f"Counted forecasts: {len(days)}, of which {n_pre} were issued before gate closure (12:00 CET) and {len(days) - n_pre} between gate closure and the publication of the results.", ""]
     if not hours:
         lines += ["No ex-ante forecasts scored yet."]
     else:
@@ -113,9 +121,66 @@ def main():
         H["bin"] = pd.cut(H.p_bind, [0, .2, .4, .6, .8, 1.0])
         for b, g in H.groupby("bin", observed=True):
             lines.append(f"| {b} | {len(g)} | {g.p_bind.mean():.2f} | {g.bind.mean():.2f} |")
+    if hours:
+        # ---- which model produced the spread forecast, and how the two compare on the same days ----
+        def mrow(key, label):
+            """One row per model of record: day-level scores as stored in the scorecards, averaged over that model's counted days."""
+            Dm = [d for d in days if d["sm"] == key]
+            if not Dm:
+                return None
+            Q = [d["q"] for d in Dm if d.get("q")]
+            mq = lambda k: f"{np.mean([q[k] for q in Q]):.2f}" if Q else "n/a"
+            X = H[H.day.isin([d["day"] for d in Dm])]
+            sx = (X.spread > 0).astype(int)
+            cov = f"{np.mean([q['coverage80'] for q in Q]):.0%}" if Q else "n/a"
+            return (f"| {label} | {len(Dm)} | {mq('pinball')} | {mq('pinball_clim')} | {mq('mae_p50')} | {mq('mae_clim_median')} | {cov} | "
+                    f"{np.mean([d['sign_brier'] for d in Dm]):.3f} | {np.mean((X.clim_pos - sx) ** 2):.3f} | {np.mean([d['sign_hit'] for d in Dm]):.0%} |")
+        rows_m = [r for r in (mrow(k, label) for k, label in (("fundamentals", "Fundamentals model"), ("grid", "Grid-only model"))) if r]
+        if rows_m:
+            lines += ["", "## Spread forecast by model", "",
+                      "The spread and sign forecasts come from the fundamentals model on every day its inputs were on JAO in time, and from the grid-only model before it was introduced and on fallback days.", "",
+                      "| Model of record | Days | Pinball loss | Pinball, climatology | P50 error, €/MWh | Climatology median error | 80% band coverage | Sign Brier | Sign Brier, climatology | Sign hit |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"] + rows_m
+        G = [d for d in days if d.get("grid") and d.get("q")]
+        if G:
+            m = lambda f: np.mean([f(d) for d in G])
+            lines += ["", "### Both models on the same days", "",
+                      "Every file issued from the fundamentals model also carries the grid-only model's spread forecast, so the two are scored on identical hours.", "",
+                      "| Model | Days | Pinball loss | P50 error, €/MWh | 80% band coverage | Sign Brier | Sign hit |", "| --- | --- | --- | --- | --- | --- | --- |",
+                      f"| Fundamentals | {len(G)} | {m(lambda d: d['q']['pinball']):.2f} | {m(lambda d: d['q']['mae_p50']):.1f} | {m(lambda d: d['q']['coverage80']):.0%} | {m(lambda d: d['sign_brier']):.3f} | {m(lambda d: d['sign_hit']):.0%} |",
+                      f"| Grid only | {len(G)} | {m(lambda d: d['grid']['pinball']):.2f} | {m(lambda d: d['grid']['mae_p50']):.1f} | {m(lambda d: d['grid']['coverage80']):.0%} | {m(lambda d: d['grid']['sign_brier']):.3f} | {m(lambda d: d['grid']['sign_hit']):.0%} |"]
+        L = [d for d in days if d.get("levels")]
+        if L:
+            lines += ["", "## DE and FR day-ahead prices", "", "Hourly price quantiles from the fundamentals model; the benchmark is yesterday's price at the same hour.", "",
+                      "| Zone | Days | P50 error, €/MWh | Yesterday's price error | Pinball loss | 80% band coverage | Mean price, €/MWh |", "| --- | --- | --- | --- | --- | --- | --- |"]
+            for z in ("DE", "FR"):
+                V = [d["levels"][z] for d in L if z in d["levels"]]
+                if not V:
+                    continue
+                pers = [v["mae_persistence"] for v in V if v.get("mae_persistence") is not None]
+                lines.append(f"| {z} | {len(V)} | {np.mean([v['mae_p50'] for v in V]):.1f} | {np.mean(pers) if pers else float('nan'):.1f} | {np.mean([v['pinball'] for v in V]):.2f} | "
+                             f"{np.mean([v['coverage80'] for v in V]):.0%} | {np.mean([v['actual_mean'] for v in V]):.1f} |")
     bt = bundle.get("backtest", {})
+    fb = (bundle.get("fund") or {}).get("backtest")
+    if fb:
+        fm = bundle["fund"]
+        lines += ["", "## Fundamentals model and its backtest", "",
+                  f"Gradient-boosted quantile models on JAO's pre-coupling publication for the target day (the TSOs' D-2 congestion forecast of vertical load, generation and Core net positions; "
+                  f"reference programmes on the non-Core borders; maximum net positions and bilateral exchanges) and on the day-ahead results up to the day before; "
+                  f"trained on {fm['train_days'][0]} to {fm['train_days'][1]} ({fm['n_train']} hours). "
+                  f"Walk-forward backtest with monthly refits, {fb['days'][0]} to {fb['days'][1]} ({fb['n_days']} days), every prediction made by a model that had seen nothing from its own month:", "",
+                  "| Hourly DE−FR spread | Fundamentals model | Climatology, last 60 days | Yesterday's value | Zero |", "| --- | --- | --- | --- | --- |",
+                  f"| Pinball loss (P10, P50, P90) | {fb['pinball']:.2f} | {fb['pinball_clim']:.2f} | | |",
+                  f"| P50 absolute error, €/MWh | {fb['mae_p50']:.1f} | {fb['mae_clim']:.1f} | {fb['mae_persistence']:.1f} | {fb['mae_zero']:.1f} |",
+                  f"| Sign Brier score | {fb['sign_brier']:.3f} | {fb['sign_brier_clim']:.3f} | | |",
+                  f"| Sign hit rate | {fb['sign_hit']:.0%} | {fb['sign_hit_clim']:.0%} | | |", "",
+                  f"Daily base spread: P50 error {fb['base']['mae_p50']:.1f} €/MWh against {fb['base']['mae_persistence']:.1f} for yesterday's value and {fb['base']['mae_clim']:.1f} for climatology; "
+                  f"sign right on {fb['base']['sign_hit']:.0%} of days. Peak: {fb['peak']['mae_p50']:.1f} against {fb['peak']['mae_persistence']:.1f} and {fb['peak']['mae_clim']:.1f}. "
+                  f"Prices: DE P50 error {fb['DE']['mae_p50']:.1f} €/MWh against {fb['DE']['mae_persistence']:.1f} for yesterday's price, FR {fb['FR']['mae_p50']:.1f} against {fb['FR']['mae_persistence']:.1f}. "
+                  f"The raw 80% bands covered {fb['coverage80_raw']:.0%} of hours; with the band-width calibration a live forecast would have had at each date (factors from earlier days only), "
+                  f"{fb.get('coverage80_calibrated', float('nan')):.0%} of hours, {fb['base'].get('coverage80_calibrated', float('nan')):.0%} of daily base and {fb['peak'].get('coverage80_calibrated', float('nan')):.0%} of daily peak outcomes."]
     if bt:
-        lines += ["", "## Model and backtest", "", f"Logistic models on the D-1 published Core domain (Creys–St-Vulbas RAM, loading and minRAM top-up, French max net positions) plus hour-of-day climatology; "
+        lines += ["", "## Grid model and its backtest", "", f"Logistic models on the D-1 published Core domain (Creys–St-Vulbas RAM, loading and minRAM top-up, French max net positions) plus hour-of-day climatology; "
                   f"trained on {bundle['train_days'][0]} to {bundle['train_days'][1]} ({bundle['n_train']} hour-rows). Held-out backtest {bt['days'][0]} to {bt['days'][1]}: "
                   f"binding AUC {bt['bind']['auc']:.2f}, Brier {bt['bind']['brier']:.3f} vs {bt['bind']['brier_clim']:.3f} climatology; "
                   f"sign AUC {bt['sign']['auc']:.2f}, Brier {bt['sign']['brier']:.3f} vs {bt['sign']['brier_clim']:.3f}"
@@ -129,14 +194,15 @@ def main():
         lines_top += ["", f"## Latest forecast: {lf['day']}", ""]
         if ok:
             lines_top += ["![Latest forecast, hour by hour](scorecard/chart_forecast.png)", ""]
-        pf = product_forecast(lf["hours"], lf["day"])
+        pf = product_forecast(lf["hours"], lf["day"], cal=(lf.get("model") or {}).get("product_cal"))
         if pf:
             lines_top += ["| Product | P(spread > 0) | P50 (P10 to P90), €/MWh |", "| --- | --- | --- |"]
             for k, label in (("base", "Base (24 h)"), ("peak", "Peak (08–21)")):
                 if k in pf:
                     lines_top.append(f"| {label} | {pf[k]['p_pos']:.2f} | {pf[k]['p50']:+.1f} ({pf[k]['p10']:+.1f} to {pf[k]['p90']:+.1f}) |")
             lines_top.append("")
-        lines_top += ["| Block | Expected binding hours | P(DE > FR) | Spread P50 (P10 to P90), €/MWh |", "| --- | --- | --- | --- |"]
+        has_px = all(h.get("de_p50") is not None and h.get("fr_p50") is not None for h in lf["hours"])
+        lines_top += ["| Block | Expected binding hours | P(DE > FR) | Spread P50 (P10 to P90), €/MWh |" + (" DE price P50 | FR price P50 |" if has_px else ""), "| --- | --- | --- | --- |" + (" --- | --- |" if has_px else "")]
         NH = _norm_hours(lf["hours"])
         for name, (a, b) in BLOCKS.items():
             B = [h for h in NH if a <= h["hour"] <= b]
@@ -144,7 +210,13 @@ def main():
                 continue
             m = lambda k: float(np.mean([h[k] for h in B])) if all(h[k] is not None for h in B) else None
             band = "n/a" if m("p50") is None else f"{m('p50'):+.0f} ({m('p10'):+.0f} to {m('p90'):+.0f})"
-            lines_top.append(f"| {name} | {sum(h['p_bind'] or 0 for h in B):.1f} | {m('p_pos'):.2f} | {band} |")
+            px = ""
+            if has_px:
+                R = [h for h in lf["hours"] if a <= h["hour"] <= b]
+                px = f" {np.mean([h['de_p50'] for h in R]):.0f} | {np.mean([h['fr_p50'] for h in R]):.0f} |"
+            lines_top.append(f"| {name} | {sum(h['p_bind'] or 0 for h in B):.1f} | {m('p_pos'):.2f} | {band} |" + px)
+        if has_px:
+            lines_top += ["", f"Spread, sign and prices from the fundamentals model; binding probability from the grid model. Day-ahead base price P50: DE {np.mean([h['de_p50'] for h in lf['hours']]):.0f} €/MWh, FR {np.mean([h['fr_p50'] for h in lf['hours']]):.0f} €/MWh."]
         lines_top += ["", "<details><summary>Hour by hour</summary>", "", "| Hour (CET) | P(bind) | P(DE > FR) | P10 | P50 | P90 |", "| --- | --- | --- | --- | --- | --- |"]
         for h in _norm_hours(lf["hours"]):
             q = lambda v: "n/a" if v is None else f"{v:+.0f}"

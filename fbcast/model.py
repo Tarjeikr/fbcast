@@ -102,7 +102,7 @@ def evaluate(bundle, test):
 
 
 def save(bundle, path):
-    joblib.dump(bundle, path)
+    joblib.dump(bundle, path, compress=3)   # the fundamentals models are a few megabytes uncompressed
 
 
 def load(path):

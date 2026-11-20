@@ -33,9 +33,11 @@ def _p_pos(p10, p50, p90):
     return 0.5 * (1 + erf(p50 / (sigma * sqrt(2))))
 
 
-def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_p90")):
+def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_p90"), cal=None):
     """Daily base (24 h) and peak spread forecast from hourly quantiles: the average of the hourly P10, P50 and P90 over the product's hours
-    (exact if the hourly errors move together, which they largely do within a day), plus P(mean > 0)."""
+    (exact if the hourly errors move together, which they largely do within a day), plus P(mean > 0).
+    `cal` holds band-width factors per product, {"base": {"lo": .., "up": ..}, ...}, estimated from out-of-sample daily errors; when given,
+    the two halves of the averaged band are scaled by them so that the daily band covers 80% of outcomes."""
     out = {}
     for name in ("base", "peak"):
         if not product_applies(name, day):
@@ -44,8 +46,11 @@ def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_
         vals = [v for v in vals if all(x is not None and x == x for x in v)]
         if len(vals) < PRODUCT_MIN_HOURS[name]:
             continue
-        a = np.mean(vals, axis=0)
-        out[name] = {"p10": float(a[0]), "p50": float(a[1]), "p90": float(a[2]), "p_pos": float(_p_pos(a[0], a[1], a[2])), "n_hours": len(vals)}
+        p10, p50, p90 = (float(x) for x in np.mean(vals, axis=0))
+        k = (cal or {}).get(name)
+        if k:
+            p10, p90 = p50 - k["lo"] * (p50 - p10), p50 + k["up"] * (p90 - p50)
+        out[name] = {"p10": p10, "p50": p50, "p90": p90, "p_pos": float(_p_pos(p10, p50, p90)), "n_hours": len(vals)}
     return out
 
 

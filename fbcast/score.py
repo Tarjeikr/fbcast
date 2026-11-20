@@ -37,11 +37,13 @@ def quantile_scores(H):
     return out
 
 
-def product_scores(H, day):
-    """Daily base and peak: the forecast issued (average of hourly quantiles), the climatological equivalent, yesterday's value and the outcome."""
+def product_scores(H, day, cal=None):
+    """Daily base and peak: the forecast issued (average of hourly quantiles, with the product band calibration the forecast was issued with),
+    the climatological equivalent, the grid-only model's equivalent when the file carries one, yesterday's value and the outcome."""
     rows = H.to_dict("records")
-    f = product_forecast(rows, day)
+    f = product_forecast(rows, day, cal=cal)
     c = product_forecast(rows, day, keys=("clim_q10", "clim_q50", "clim_q90"))
+    g = product_forecast(rows, day, keys=("grid_p10", "grid_p50", "grid_p90")) if "grid_p50" in H else {}
     out = {}
     for name, v in f.items():
         X = H[H.hour.isin(product_hours(name))]
@@ -51,8 +53,34 @@ def product_scores(H, day):
         d.update({"actual": round(float(X.spread.mean()), 2), "n_actual": int(len(X)),
                   "clim_p50": round(c[name]["p50"], 2) if name in c else None, "clim_p_pos": round(c[name]["p_pos"], 3) if name in c else None,
                   "prev_actual": round(float(X.spread_prev.mean()), 2) if X.spread_prev.notna().sum() >= PRODUCT_MIN_HOURS[name] else None})
+        if name in g:
+            d.update({"grid_p10": round(g[name]["p10"], 2), "grid_p50": round(g[name]["p50"], 2), "grid_p90": round(g[name]["p90"], 2), "grid_p_pos": round(g[name]["p_pos"], 3)})
         out[name] = d
     return out
+
+
+def level_scores(H):
+    """DE and FR price quantiles against the outcome, with yesterday's price at the same hour as the benchmark."""
+    out = {}
+    for z, pre in (("DE", "de"), ("FR", "fr")):
+        if f"{pre}_p50" not in H or H[f"{pre}_p50"].isna().all():
+            continue
+        y = H[z].values
+        out[z] = {"mae_p50": float(np.mean(np.abs(y - H[f"{pre}_p50"]))), "coverage80": float(np.mean((y >= H[f"{pre}_p10"]) & (y <= H[f"{pre}_p90"]))),
+                  "pinball": float(np.mean([_pinball(y, H[f"{pre}_p10"], 0.1), _pinball(y, H[f"{pre}_p50"], 0.5), _pinball(y, H[f"{pre}_p90"], 0.9)])),
+                  "mae_persistence": float(np.mean(np.abs(H[z] - H[f"{z}_prev"]))) if H[f"{z}_prev"].notna().all() else None,
+                  "actual_mean": float(np.mean(y)), "p50_mean": float(H[f"{pre}_p50"].mean())}
+    return out or None
+
+
+def grid_scores(H):
+    """The grid-only model's spread and sign forecasts on the same hours, for a like-for-like comparison with the fundamentals model."""
+    if "grid_p50" not in H or H.grid_p50.isna().all():
+        return None
+    y = H.spread.values; s = (H.spread > 0).astype(int)
+    return {"pinball": float(np.mean([_pinball(y, H.grid_p10, 0.1), _pinball(y, H.grid_p50, 0.5), _pinball(y, H.grid_p90, 0.9)])),
+            "mae_p50": float(np.mean(np.abs(y - H.grid_p50))), "coverage80": float(np.mean((y >= H.grid_p10) & (y <= H.grid_p90))),
+            "sign_brier": float(np.mean((H.grid_p_de_above_fr - s) ** 2)), "sign_hit": float(((H.grid_p_de_above_fr > 0.5) == s).mean())}
 
 
 def score_day(day, fc, prices=None):
@@ -68,15 +96,19 @@ def score_day(day, fc, prices=None):
     pr = prices if prices is not None else data.fetch_prices(prev, (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
     Rall = realized(sp, npos, pr)
     R = Rall[Rall.day == day]
-    Rprev = Rall[Rall.day == prev][["hour", "spread"]].rename(columns={"spread": "spread_prev"})
+    Rprev = Rall[Rall.day == prev][["hour", "spread", "DE", "FR"]].rename(columns={"spread": "spread_prev", "DE": "DE_prev", "FR": "FR_prev"})
     if len(R) < 20:
         return None
-    H = pd.DataFrame(fc["hours"]).merge(R[["hour", "bind", "spread", "hub_FR"]], on="hour", how="inner").merge(Rprev, on="hour", how="left")
+    H = pd.DataFrame(fc["hours"]).merge(R[["hour", "bind", "spread", "hub_FR", "DE", "FR"]], on="hour", how="inner").merge(Rprev, on="hour", how="left")
     H = H.dropna(subset=["p_bind", "p_de_above_fr"])
     if len(H) < 20:
         status = "incomplete"  # issued on a partially published domain; kept but not counted
     y, s = H.bind.astype(int), (H.spread > 0).astype(int)
+    mdl = fc.get("model") or {}
+    gate = fc.get("gate_closure_utc") or (pd.Timestamp(day) - pd.Timedelta(hours=12)).tz_localize("Europe/Berlin").tz_convert("UTC").isoformat()   # 12:00 CET on D-1
     out = {"day": day, "status": status, "issued_at_utc": fc["issued_at_utc"], "results_published_utc": results_pub, "n_hours": int(len(H)),
+           "issued_before_gate_closure": bool(pd.Timestamp(fc["issued_at_utc"]) < pd.Timestamp(gate)),
+           "model_version": mdl.get("version", 1), "spread_model": mdl.get("spread_model", "grid"),
            "bind": {"actual_hours": int(y.sum()), "expected_hours": round(float(H.p_bind.sum()), 1), "brier": float(np.mean((H.p_bind - y) ** 2)),
                     "hit": float(((H.p_bind > 0.5) == y).mean()), "logloss": float(-np.mean(y * np.log(H.p_bind.clip(1e-3, 1 - 1e-3)) + (1 - y) * np.log(1 - H.p_bind.clip(1e-3, 1 - 1e-3))))},
            "sign": {"actual_pos_hours": int(s.sum()), "brier": float(np.mean((H.p_de_above_fr - s) ** 2)), "hit": float(((H.p_de_above_fr > 0.5) == s).mean())},
@@ -86,22 +118,28 @@ def score_day(day, fc, prices=None):
                                "p_bind": float(H[H.hour.isin([15, 16, 17])].p_bind.mean()), "actual_bind": float(H[H.hour.isin([15, 16, 17])].bind.mean())},
            "fr_net_position_mean": float(H.hub_FR.mean()) if H.hub_FR.notna().any() else None,
            "quantiles": quantile_scores(H),
-           "products": product_scores(H, day) if status != "incomplete" else {},
+           "levels": level_scores(H), "grid_only": grid_scores(H),
+           "products": product_scores(H, day, mdl.get("product_cal")) if status != "incomplete" else {},
            "hours": [{"hour": int(r.hour), "p_bind": r.p_bind, "bind": int(r.bind), "p_de_above_fr": r.p_de_above_fr, "spread": round(float(r.spread), 1), "e_spread": r.e_spread,
                       "p10": _f(getattr(r, "spread_p10", None)), "p50": _f(getattr(r, "spread_p50", None)), "p90": _f(getattr(r, "spread_p90", None)),
-                      "clim_q10": _f(getattr(r, "clim_q10", None)), "clim_q50": _f(getattr(r, "clim_q50", None)), "clim_q90": _f(getattr(r, "clim_q90", None))} for r in H.itertuples()]}
+                      "clim_q10": _f(getattr(r, "clim_q10", None)), "clim_q50": _f(getattr(r, "clim_q50", None)), "clim_q90": _f(getattr(r, "clim_q90", None)),
+                      "de": _f(r.DE), "fr": _f(r.FR), "de_p50": _f(getattr(r, "de_p50", None)), "fr_p50": _f(getattr(r, "fr_p50", None))} for r in H.itertuples()]}
     return out
 
 
 def verify():
     """Recompute every committed scorecard from freshly downloaded JAO and SMARD data and report any difference."""
     bad = 0
-    for fn in sorted(glob.glob(os.path.join(ROOT, "scorecard", "*.json"))):
+    files = sorted(glob.glob(os.path.join(ROOT, "scorecard", "2*.json")))
+    days = [os.path.basename(f)[:-5] for f in files]
+    # one price download for the whole record: a request per day runs into the API's rate limit as the record grows
+    prices = data.fetch_prices((pd.Timestamp(min(days)) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"), (pd.Timestamp(max(days)) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")) if days else None
+    for fn in files:
         old = json.load(open(fn)); day = old["day"]
         fc = json.load(open(os.path.join(ROOT, "forecasts", f"{day}.json")))
         for ds in ("shadowPrices", "netPos"):
             data.fetch_day(ds, day, force=True)
-        new = score_day(day, fc)
+        new = score_day(day, fc, prices)
         same = new is not None and abs(new["bind"]["brier"] - old["bind"]["brier"]) < 1e-6 and abs(new["sign"]["brier"] - old["sign"]["brier"]) < 1e-6 and new["bind"]["actual_hours"] == old["bind"]["actual_hours"]
         ok_time = (new is None) or (new["status"] != "ex-ante") or (new.get("results_published_utc") is None) or (fc["issued_at_utc"] < new["results_published_utc"])
         print(f"{day}: scorecard {'reproduced' if same else 'DIFFERS'}; issued {fc['issued_at_utc'][:16]} status {new['status'] if new else fc['status']}; results published {new['results_published_utc'] if new else 'n/a'}")
@@ -160,6 +198,9 @@ def rebuild_log():
                      "sign_brier": sc["sign"]["brier"], "sign_hit": sc["sign"]["hit"], "aft_actual_spread": sc["afternoon_15_17"]["actual_spread"], "aft_p_pos": sc["afternoon_15_17"]["p_pos"],
                      "pinball": q.get("pinball"), "pinball_clim": q.get("pinball_clim"), "coverage80": q.get("coverage80"), "mae_p50": q.get("mae_p50"), "mae_persistence": q.get("mae_persistence"),
                      "fr_net_position_mean": sc.get("fr_net_position_mean"),
+                     "model_version": sc.get("model_version", 1), "before_gate_closure": sc.get("issued_before_gate_closure"),
+                     "de_mae_p50": ((sc.get("levels") or {}).get("DE") or {}).get("mae_p50"), "fr_mae_p50": ((sc.get("levels") or {}).get("FR") or {}).get("mae_p50"),
+                     "grid_pinball": (sc.get("grid_only") or {}).get("pinball"),
                      **{f"{k}_{f}": (sc.get("products") or {}).get(k, {}).get(f) for k in ("base", "peak") for f in ("p50", "p_pos", "actual")}})
     if rows:
         pd.DataFrame(rows).to_csv(os.path.join(ROOT, "scorecard", "log.csv"), index=False)
