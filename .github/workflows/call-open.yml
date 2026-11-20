@@ -1,0 +1,82 @@
+name: call (open)
+# Opens a paper position in the public book (see BOOK.md). The entry is written by this run and committed through the GitHub API,
+# so it carries GitHub's signature and timestamp, and it is stamped with OpenTimestamps. Calls are never edited afterwards.
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "forward (a power forward) or lttr (a transmission right bought at a JAO auction)"
+        type: choice
+        options: [forward, lttr]
+        default: forward
+        required: true
+      product:
+        description: "Forward: DE, FR or a spread such as DE-FR (long first, short second). LTTR: border direction such as FR>DE"
+        required: true
+      period:
+        description: "Cal-2027, Q1-2027, Dec-2026, W49-2026 or 2026-12-01..2026-12-07"
+        required: true
+      direction:
+        description: "Forwards only"
+        type: choice
+        options: [long, short]
+        default: long
+      profile:
+        description: "Forwards only"
+        type: choice
+        options: [base, peak]
+        default: base
+      size:
+        description: "Size in MW"
+        required: true
+      price:
+        description: "Entry price in EUR/MWh: the exchange settlement price, or the auction clearing price for an LTTR"
+        required: true
+      source:
+        description: "Where that price is from, with its date (for example: EEX settlement 19 Nov 2026)"
+        required: true
+      rationale:
+        description: "Why, in one to three sentences"
+        required: true
+      target_stop:
+        description: "Optional: target and stop in EUR/MWh, written as 25/5"
+        required: false
+concurrency:
+  group: book
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt opentimestamps-client
+      - name: record the call
+        env:   # inputs reach the script as environment variables, never as text inside the command line
+          KIND: ${{ inputs.kind }}
+          PRODUCT: ${{ inputs.product }}
+          PERIOD: ${{ inputs.period }}
+          DIRECTION: ${{ inputs.direction }}
+          PROFILE: ${{ inputs.profile }}
+          SIZE: ${{ inputs.size }}
+          PRICE: ${{ inputs.price }}
+          SOURCE: ${{ inputs.source }}
+          RATIONALE: ${{ inputs.rationale }}
+          TARGET_STOP: ${{ inputs.target_stop }}
+        run: |
+          target="${TARGET_STOP%%/*}"; stop=""
+          case "$TARGET_STOP" in */*) stop="${TARGET_STOP##*/}";; esac
+          python -m fbcast.book open --kind "$KIND" --product "$PRODUCT" --period "$PERIOD" --direction "$DIRECTION" --profile "$PROFILE" \
+            --size "$SIZE" --price "$PRICE" --source "$SOURCE" --rationale "$RATIONALE" --target "$target" --stop "$stop"
+      - name: stamp the call on the Bitcoin blockchain (OpenTimestamps)
+        run: |
+          for f in $(git ls-files --others --exclude-standard book/calls | grep '\.json$'); do ots stamp "$f" || true; done
+      - name: commit through the GitHub API, so the commit is signed by GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/api-commit.sh "call $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard book BOOK.md) $(git diff --name-only book BOOK.md)

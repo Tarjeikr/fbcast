@@ -1,19 +1,28 @@
 name: retrain
 on:
   schedule:
-    - cron: "0 6 * * 1"    # Mondays 07:00 CET: refit on all history to yesterday; the backtest is stored in models/bundle.json
+    - cron: "17 3 * * 1"   # Mondays. GitHub starts scheduled runs hours late; nothing here depends on the exact time.
   workflow_dispatch:
 permissions:
   contents: write
 jobs:
   retrain:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: reuse the downloaded history (JAO two-day windows, closed price years) from the previous run
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: fbcast-data-${{ github.run_id }}
+          restore-keys: fbcast-data-
       - run: pip install -r requirements.txt
+      # Grid model: history from 1 Sep 2026. Fundamentals model: all history since June 2022, with a twelve-month walk-forward
+      # backtest. The first run downloads about 4,000 small JAO windows (some ten minutes); later runs only the new days.
       - run: python -m fbcast.train
       - name: commit through the GitHub API, so the commit is signed by GitHub
         env:

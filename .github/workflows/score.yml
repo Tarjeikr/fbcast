@@ -16,9 +16,11 @@ jobs:
       - run: pip install -r requirements.txt opentimestamps-client
       - run: python -m fbcast.score
       - run: python -m fbcast.report
+      - name: refresh the book (marks calls in delivery against the published day-ahead prices)
+        run: python -m fbcast.book report || echo "book report failed; the scorecard is committed regardless"
       - name: upgrade pending timestamp proofs once their Bitcoin block is confirmed
-        run: for f in forecasts/*.ots; do ots upgrade "$f" || true; done; rm -f forecasts/*.ots.bak
+        run: for f in forecasts/*.ots book/calls/*.ots book/closes/*.ots; do [ -f "$f" ] && ots upgrade "$f" || true; done; rm -f forecasts/*.ots.bak book/calls/*.ots.bak book/closes/*.ots.bak
       - name: commit through the GitHub API, so the commit is signed by GitHub
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/api-commit.sh "score $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard scorecard forecasts) $(git diff --name-only scorecard forecasts SCORECARD.md)
+        run: bash .github/api-commit.sh "score $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard scorecard forecasts BOOK.md) $(git diff --name-only scorecard forecasts SCORECARD.md BOOK.md book)

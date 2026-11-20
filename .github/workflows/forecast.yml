@@ -1,25 +1,55 @@
 name: forecast
 on:
   schedule:
-    - cron: "5 10 * * *"   # 11:05 CET in winter: the final Core domain for D+1 is usually on JAO by 10:00 CET; the auction closes 12:00 CET
-    - cron: "5 11 * * *"   # second chance at 12:05 CET; the script exits at once if today's forecast already exists
+    # GitHub starts scheduled runs late. Every scheduled run of this repository from 4 to 18 Nov 2026 began 4.5 to 10.5 hours
+    # after its cron time, so a single slot at the right hour always missed the auction. Instead there is a slot every
+    # 30 minutes from 21:07 to 11:37 CET (20:07 to 10:37 UTC): for any delay between zero and 13 hours, several runs start inside
+    # the window that matters, after JAO publishes the domain (about 09:55 CET) and before gate closure (12:00 CET).
+    # A run that starts before 09:00 CET, or after the day's forecast exists, stops at the first step and takes a few seconds.
+    - cron: "7,37 0-10,20-23 * * *"
   workflow_dispatch:
+concurrency:
+  group: forecast            # one run at a time, so two delayed slots can never both issue the same day's forecast
+  cancel-in-progress: false
 permissions:
   contents: write
 jobs:
   forecast:
     runs-on: ubuntu-latest
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
+      - name: is there anything to do?
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          day=$(TZ=Europe/Berlin date -d tomorrow +%F)
+          hhmm=$(TZ=Europe/Berlin date +%H%M)
+          if [ -f "forecasts/$day.json" ]; then
+            echo "forecast for $day already issued; nothing to do"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = "schedule" ] && [ "$((10#$hhmm))" -lt 900 ]; then
+            echo "$hhmm CET is too early for $day: JAO publishes the domain at about 09:55 CET"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "issuing the forecast for $day (started $hhmm CET)"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.go == 'true'
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt opentimestamps-client
-      - run: python -m fbcast.forecast --wait-minutes 45
+      - if: steps.gate.outputs.go == 'true'
+        run: pip install -r requirements.txt opentimestamps-client
+      - if: steps.gate.outputs.go == 'true'
+        run: python -m fbcast.forecast --wait-minutes 80
       - name: stamp the forecast on the Bitcoin blockchain (OpenTimestamps)
+        if: steps.gate.outputs.go == 'true'
         run: |
           for f in $(git ls-files --others --exclude-standard forecasts | grep '\.json$'); do ots stamp "$f" || true; done
       - name: commit through the GitHub API, so the commit is signed by GitHub
+        if: steps.gate.outputs.go == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/api-commit.sh "forecast $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard forecasts) $(git diff --name-only forecasts)

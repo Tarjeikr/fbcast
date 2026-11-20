@@ -1,0 +1,71 @@
+name: call (mark or close)
+# Marks a forward at a new settlement price, or closes a call. A close is a second file; the original call is not touched.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [mark, close]
+        default: mark
+        required: true
+      id:
+        description: "Close only: the id of the call, for example 20261120-01"
+        required: false
+      product:
+        description: "Mark only: the product exactly as in the call (DE, FR, DE-FR)"
+        required: false
+      period:
+        description: "Mark only: the period exactly as in the call (Q1-2027, Dec-2026, ...)"
+        required: false
+      profile:
+        description: "Mark only"
+        type: choice
+        options: [base, peak]
+        default: base
+      price:
+        description: "Settlement price in EUR/MWh"
+        required: true
+      source:
+        description: "Where that price is from, with its date"
+        required: true
+      note:
+        description: "Close only: optional note"
+        required: false
+concurrency:
+  group: book
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt opentimestamps-client
+      - name: record the mark or the close
+        env:
+          ACTION: ${{ inputs.action }}
+          ID: ${{ inputs.id }}
+          PRODUCT: ${{ inputs.product }}
+          PERIOD: ${{ inputs.period }}
+          PROFILE: ${{ inputs.profile }}
+          PRICE: ${{ inputs.price }}
+          SOURCE: ${{ inputs.source }}
+          NOTE: ${{ inputs.note }}
+        run: |
+          if [ "$ACTION" = "close" ]; then
+            python -m fbcast.book close --id "$ID" --price "$PRICE" --source "$SOURCE" --note "$NOTE"
+          else
+            python -m fbcast.book mark --product "$PRODUCT" --period "$PERIOD" --profile "$PROFILE" --price "$PRICE" --source "$SOURCE"
+          fi
+      - name: stamp a new close on the Bitcoin blockchain (OpenTimestamps)
+        run: |
+          for f in $(git ls-files --others --exclude-standard book/closes | grep '\.json$'); do ots stamp "$f" || true; done
+      - name: commit through the GitHub API, so the commit is signed by GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/api-commit.sh "book $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard book BOOK.md) $(git diff --name-only book BOOK.md)
