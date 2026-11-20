@@ -15,10 +15,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: reuse the downloaded history (JAO two-day windows, closed price years) from the previous run
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data
-          key: fbcast-data-${{ github.run_id }}
+          key: fbcast-data-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: fbcast-data-
       - run: pip install -r requirements.txt
       # Grid model: history from 1 Sep 2026. Fundamentals model: all history since June 2022, with a twelve-month walk-forward
@@ -28,3 +28,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/api-commit.sh "retrain $(date -u +%Y-%m-%dT%H:%MZ)" $(git diff --name-only models) $(git ls-files --others --exclude-standard models)
+      - name: keep the downloaded history for the next run, also when this one stopped part-way
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: fbcast-data-${{ github.run_id }}-${{ github.run_attempt }}
