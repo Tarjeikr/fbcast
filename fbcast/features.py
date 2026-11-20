@@ -10,10 +10,14 @@ import glob, json
 import numpy as np, pandas as pd
 
 BLOCKS = {"night 00–05": (0, 5), "morning 06–09": (6, 9), "midday 10–14": (10, 14), "afternoon 15–17": (15, 17), "evening 18–20": (18, 20), "late 21–23": (21, 23)}
-# Daily products. Peak = delivery 08:00-21:00 CET (hours beginning 08 to 20) on all seven days; set PEAK_WEEKDAYS_ONLY = True for exchange-style Mon-Fri peak.
-PEAK_HOURS = tuple(range(8, 21))
-PEAK_WEEKDAYS_ONLY = False
+# Daily products, as an exchange defines them. Base = all hours of the CET day. Peak = delivery 08:00-20:00 CET (hours beginning 08 to 19),
+# Monday to Friday, public holidays included; there is no peak product on a Saturday or Sunday.
+PEAK_HOURS = tuple(range(8, 20))
+PEAK_WEEKDAYS_ONLY = True
 PRODUCT_MIN_HOURS = {"base": 20, "peak": 11}  # fewer hours than this (partial days) and the product is not scored
+# The three quantities a daily product is quoted for, with the hourly quantile fields of a forecast file and the key prefix of their
+# band calibration in model.product_cal ("base" and "peak" for the spread, "DE_base", "FR_peak", ... for the prices).
+TARGETS = {"DE": (("de_p10", "de_p50", "de_p90"), "DE_"), "FR": (("fr_p10", "fr_p50", "fr_p90"), "FR_"), "spread": (("spread_p10", "spread_p50", "spread_p90"), "")}
 
 
 def product_hours(name):
@@ -26,6 +30,15 @@ def product_applies(name, day):
     return True
 
 
+def previous_product_day(name, day):
+    """The last day before `day` on which the product was delivered: yesterday for base, the previous weekday for peak. Its price is
+    known when the forecast for `day` is issued, which makes it the natural benchmark."""
+    d = pd.Timestamp(day) - pd.Timedelta(days=1)
+    while not product_applies(name, d):
+        d -= pd.Timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
 def _p_pos(p10, p50, p90):
     """P(daily mean > 0) from a normal approximation whose width is read off the P10-P90 band (floor 1 EUR/MWh)."""
     from math import erf, sqrt
@@ -33,8 +46,8 @@ def _p_pos(p10, p50, p90):
     return 0.5 * (1 + erf(p50 / (sigma * sqrt(2))))
 
 
-def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_p90"), cal=None):
-    """Daily base (24 h) and peak spread forecast from hourly quantiles: the average of the hourly P10, P50 and P90 over the product's hours
+def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_p90"), cal=None, cal_prefix=""):
+    """Daily base and peak forecast from hourly quantiles: the average of the hourly P10, P50 and P90 over the product's hours
     (exact if the hourly errors move together, which they largely do within a day), plus P(mean > 0).
     `cal` holds band-width factors per product, {"base": {"lo": .., "up": ..}, ...}, estimated from out-of-sample daily errors; when given,
     the two halves of the averaged band are scaled by them so that the daily band covers 80% of outcomes."""
@@ -47,10 +60,22 @@ def product_forecast(hours, day=None, keys=("spread_p10", "spread_p50", "spread_
         if len(vals) < PRODUCT_MIN_HOURS[name]:
             continue
         p10, p50, p90 = (float(x) for x in np.mean(vals, axis=0))
-        k = (cal or {}).get(name)
+        k = (cal or {}).get(cal_prefix + name)
         if k:
             p10, p90 = p50 - k["lo"] * (p50 - p10), p50 + k["up"] * (p90 - p50)
         out[name] = {"p10": p10, "p50": p50, "p90": p90, "p_pos": float(_p_pos(p10, p50, p90)), "n_hours": len(vals)}
+    return out
+
+
+def daily_forecasts(hours, day, cal=None):
+    """Base and peak forecasts (p10, p50, p90) of the DE price, the FR price and the DE-FR spread from the hourly quantiles of a forecast
+    file, keyed "DE_base", "FR_peak", "spread_base", ... Only the products that exist on `day` and the targets the file carries."""
+    out = {}
+    for target, (keys, prefix) in TARGETS.items():
+        if not hours or any(h.get(keys[1]) is None for h in hours):
+            continue
+        for name, v in product_forecast(hours, day, keys=keys, cal=cal, cal_prefix=prefix).items():
+            out[f"{target}_{name}"] = {"p10": v["p10"], "p50": v["p50"], "p90": v["p90"], "n_hours": v["n_hours"]}
     return out
 
 

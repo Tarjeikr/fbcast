@@ -6,7 +6,7 @@ import glob, json, os, sys
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fbcast import data
-from fbcast.features import realized, product_forecast, product_hours, PRODUCT_MIN_HOURS
+from fbcast.features import realized, product_forecast, product_hours, PRODUCT_MIN_HOURS, daily_forecasts, previous_product_day
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -59,6 +59,23 @@ def product_scores(H, day, cal=None):
     return out
 
 
+def daily_scores(H, day, cal, Rall):
+    """Base and peak of the DE price, the FR price and the DE-FR spread: the forecast as issued (with its band calibration), the outcome,
+    and the outcome on the product's previous delivery day, which a forecast has to beat to be worth anything."""
+    out = {}
+    for key, v in daily_forecasts(H.to_dict("records"), day, cal).items():
+        target, name = key.split("_")
+        X = H[H.hour.isin(product_hours(name))]
+        if len(X) < PRODUCT_MIN_HOURS[name]:
+            continue
+        prev_day = previous_product_day(name, day)
+        Y = Rall[(Rall.day == prev_day) & Rall.hour.isin(product_hours(name))][target].dropna()
+        actual = float(X[target].mean())
+        out[key] = {"p10": round(v["p10"], 2), "p50": round(v["p50"], 2), "p90": round(v["p90"], 2), "actual": round(actual, 2), "in_band": bool(v["p10"] <= actual <= v["p90"]),
+                    "prev_day": prev_day, "prev_actual": round(float(Y.mean()), 2) if len(Y) >= PRODUCT_MIN_HOURS[name] else None}
+    return out
+
+
 def level_scores(H):
     """DE and FR price quantiles against the outcome, with yesterday's price at the same hour as the benchmark."""
     out = {}
@@ -93,7 +110,8 @@ def score_day(day, fc, prices=None):
     if sp.empty:
         return None
     prev = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    pr = prices if prices is not None else data.fetch_prices(prev, (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+    # four days back: the benchmark for a Monday peak is the Friday before
+    pr = prices if prices is not None else data.fetch_prices((pd.Timestamp(day) - pd.Timedelta(days=4)).strftime("%Y-%m-%d"), (pd.Timestamp(day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
     Rall = realized(sp, npos, pr)
     R = Rall[Rall.day == day]
     Rprev = Rall[Rall.day == prev][["hour", "spread", "DE", "FR"]].rename(columns={"spread": "spread_prev", "DE": "DE_prev", "FR": "FR_prev"})
@@ -120,6 +138,7 @@ def score_day(day, fc, prices=None):
            "quantiles": quantile_scores(H),
            "levels": level_scores(H), "grid_only": grid_scores(H),
            "products": product_scores(H, day, mdl.get("product_cal")) if status != "incomplete" else {},
+           "daily": daily_scores(H, day, mdl.get("product_cal"), Rall) if status != "incomplete" else {},
            "hours": [{"hour": int(r.hour), "p_bind": r.p_bind, "bind": int(r.bind), "p_de_above_fr": r.p_de_above_fr, "spread": round(float(r.spread), 1), "e_spread": r.e_spread,
                       "p10": _f(getattr(r, "spread_p10", None)), "p50": _f(getattr(r, "spread_p50", None)), "p90": _f(getattr(r, "spread_p90", None)),
                       "clim_q10": _f(getattr(r, "clim_q10", None)), "clim_q50": _f(getattr(r, "clim_q50", None)), "clim_q90": _f(getattr(r, "clim_q90", None)),
@@ -133,7 +152,7 @@ def verify():
     files = sorted(glob.glob(os.path.join(ROOT, "scorecard", "2*.json")))
     days = [os.path.basename(f)[:-5] for f in files]
     # one price download for the whole record: a request per day runs into the API's rate limit as the record grows
-    prices = data.fetch_prices((pd.Timestamp(min(days)) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"), (pd.Timestamp(max(days)) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")) if days else None
+    prices = data.fetch_prices((pd.Timestamp(min(days)) - pd.Timedelta(days=4)).strftime("%Y-%m-%d"), (pd.Timestamp(max(days)) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")) if days else None
     for fn in files:
         old = json.load(open(fn)); day = old["day"]
         fc = json.load(open(os.path.join(ROOT, "forecasts", f"{day}.json")))
@@ -168,7 +187,7 @@ def main():
     if pending:  # one price download for the whole backlog: energy-charts rate-limits repeated requests
         lo, hi = min(d for d, _ in pending), max(d for d, _ in pending)
         try:
-            prices = data.fetch_prices((pd.Timestamp(lo) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"), (pd.Timestamp(hi) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+            prices = data.fetch_prices((pd.Timestamp(lo) - pd.Timedelta(days=4)).strftime("%Y-%m-%d"), (pd.Timestamp(hi) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
         except Exception as e:
             print("could not download prices (%s); nothing scored this run" % type(e).__name__, flush=True)
             failed += [d for d, _ in pending]; pending = []
@@ -201,6 +220,7 @@ def rebuild_log():
                      "model_version": sc.get("model_version", 1), "before_gate_closure": sc.get("issued_before_gate_closure"),
                      "de_mae_p50": ((sc.get("levels") or {}).get("DE") or {}).get("mae_p50"), "fr_mae_p50": ((sc.get("levels") or {}).get("FR") or {}).get("mae_p50"),
                      "grid_pinball": (sc.get("grid_only") or {}).get("pinball"),
+                     **{f"{k}_{f}": v.get(f) for k, v in (sc.get("daily") or {}).items() for f in ("p50", "actual")},
                      **{f"{k}_{f}": (sc.get("products") or {}).get(k, {}).get(f) for k in ("base", "peak") for f in ("p50", "p_pos", "actual")}})
     if rows:
         pd.DataFrame(rows).to_csv(os.path.join(ROOT, "scorecard", "log.csv"), index=False)

@@ -192,18 +192,46 @@ def widen(q10, q50, q90, k):
     return q50 - k["lo"] * (q50 - q10), q50 + k["up"] * (q90 - q50)
 
 
+PRODUCT_TARGETS = (("spread", "", "y_spread", ""), ("DE", "de_", "y_DE", "DE_"), ("FR", "fr_", "y_FR", "FR_"))   # target, quantile prefix, outcome, calibration key prefix
+
+
+def product_key(target, name):
+    """Key of a daily product's band factors: "base" and "peak" for the spread, "DE_base", "FR_peak", ... for the prices."""
+    return ("" if target == "spread" else target + "_") + name
+
+
+def product_table(P):
+    """Daily base and peak aggregates of hourly out-of-sample predictions: one row per target (spread, DE, FR), product and day on
+    which the product is delivered, with the outcome, the averaged hourly quantiles and the outcome on the product's previous
+    delivery day (yesterday for base, the previous weekday for peak), which is the benchmark a forecast has to beat."""
+    from .features import product_hours, product_applies, previous_product_day, PRODUCT_MIN_HOURS
+    rows = []
+    for name in ("base", "peak"):
+        ok_day = {d: product_applies(name, d) for d in P.day.unique()}
+        X = P[P.hour.isin(product_hours(name)) & P.day.map(ok_day)]
+        for target, pre, ycol, _ in PRODUCT_TARGETS:
+            g = X.dropna(subset=[ycol, pre + "q50"]).groupby("day")
+            D = pd.DataFrame({"y": g[ycol].mean(), "q10": g[pre + "q10"].mean(), "q50": g[pre + "q50"].mean(), "q90": g[pre + "q90"].mean(), "n": g[ycol].size()})
+            D = D[D.n >= PRODUCT_MIN_HOURS[name]]
+            if D.empty:
+                continue
+            D["prev"] = [D.y.get(previous_product_day(name, d), np.nan) for d in D.index]
+            D["target"], D["product"] = target, name
+            rows.append(D.reset_index())
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["day", "y", "q10", "q50", "q90", "n", "prev", "target", "product"])
+
+
 def calibration(P):
     """Band-width factors from out-of-sample predictions P (columns y_spread, y_DE, y_FR and the raw quantiles): per target for the
-    hourly bands from the last CAL_DAYS days, and for the daily base and peak spread from the last CAL_DAYS_PRODUCT days."""
-    from .features import product_hours
+    hourly bands from the last CAL_DAYS days, and per daily product (base and peak of the spread and of each price) from the last
+    CAL_DAYS_PRODUCT days of daily errors."""
     days = sorted(P.day.unique())
     H = P[P.day.isin(days[-CAL_DAYS:])]
     cal = {"spread": band_factors(H.y_spread, H.q10, H.q50, H.q90), "DE": band_factors(H.y_DE, H.de_q10, H.de_q50, H.de_q90),
            "FR": band_factors(H.y_FR, H.fr_q10, H.fr_q50, H.fr_q90), "days": [days[-CAL_DAYS:][0], days[-1]]}
-    Pc = apply_calibration(P[P.day.isin(days[-CAL_DAYS_PRODUCT:])], {**cal, "base": None, "peak": None})
-    for name in ("base", "peak"):
-        X = Pc[Pc.hour.isin(product_hours(name))].groupby("day").agg(y=("y_spread", "mean"), q10=("q10", "mean"), q50=("q50", "mean"), q90=("q90", "mean"))
-        cal[name] = band_factors(X.y, X.q10, X.q50, X.q90)
+    T = product_table(apply_calibration(P[P.day.isin(days[-CAL_DAYS_PRODUCT:])], cal))
+    for (target, name), D in T.groupby(["target", "product"]):
+        cal[product_key(target, name)] = band_factors(D.y, D.q10, D.q50, D.q90)
     return cal
 
 
@@ -243,8 +271,8 @@ def walk_forward(X, first, last, freq="MS", feats=None, log=None):
 
 def summary(P, cal_rolling=True):
     """Skill of out-of-sample predictions P against a 60-day hour-of-day climatology, persistence and a zero forecast.
-    Band coverage is reported raw and after the rolling calibration a live forecast would have had (factors from earlier days only)."""
-    from .features import product_hours
+    Band coverage is reported raw and after the rolling calibration a live forecast would have had (factors from earlier days only).
+    "products" holds the six daily products (base and peak of the spread and of each price) against the previous delivery day's value."""
     S = P.dropna(subset=["y_spread", "q50"]).copy()
     y = S.y_spread.values
     out = {"days": [S.day.min(), S.day.max()], "n_days": int(S.day.nunique()), "n_hours": int(len(S)),
@@ -261,25 +289,28 @@ def summary(P, cal_rolling=True):
         L = P.dropna(subset=["y_" + t, pre + "q50"])
         out[t] = {"mae_p50": float(np.mean(np.abs(L["y_" + t] - L[pre + "q50"]))), "mae_persistence": float(np.nanmean(np.abs(L["y_" + t] - L[t + "_l1"]))) if t + "_l1" in L else None,
                   "coverage80_raw": float(np.mean((L["y_" + t] >= L[pre + "q10"]) & (L["y_" + t] <= L[pre + "q90"]))), "mean_abs_price": float(np.mean(np.abs(L["y_" + t])))}
-    for name in ("base", "peak"):
-        D = S[S.hour.isin(product_hours(name))].groupby("day").agg(y=("y_spread", "mean"), q50=("q50", "mean"), l1=("l1", "mean"), c50=("c50", "mean"))
-        out[name] = {"mae_p50": float(np.mean(np.abs(D.y - D.q50))), "mae_persistence": float(np.nanmean(np.abs(D.y - D.l1))), "mae_clim": float(np.nanmean(np.abs(D.y - D.c50))),
-                     "sign_hit": float(np.mean((D.q50 > 0) == (D.y > 0)))}
+    T = product_table(S)
+    out["products"] = {}
+    for (target, name), D in T.groupby(["target", "product"]):
+        e = {"days": int(len(D)), "mean_actual": float(D.y.mean()), "mae_p50": float(np.mean(np.abs(D.y - D.q50))), "mae_prev": float(np.nanmean(np.abs(D.y - D.prev))),
+             "coverage80_raw": float(np.mean((D.y >= D.q10) & (D.y <= D.q90)))}
+        if target == "spread":
+            e["sign_hit"] = float(np.mean((D.q50 > 0) == (D.y > 0)))
+        out["products"][f"{target}_{name}"] = e
     if cal_rolling:
-        days = sorted(S.day.unique()); cov, covp = [], {"base": [], "peak": []}
+        days = sorted(S.day.unique()); cov, covp = [], {}
         for i in range(CAL_DAYS, len(days), 7):                      # recalibrate weekly, as the live retrain does
             past, week = S[S.day.isin(days[max(0, i - CAL_DAYS_PRODUCT):i])], S[S.day.isin(days[i:i + 7])]
             cal = calibration(past)
             W = apply_calibration(week, cal)
             cov.append(((W.y_spread >= W.q10) & (W.y_spread <= W.q90)).values)
-            for name in ("base", "peak"):
-                D = W[W.hour.isin(product_hours(name))].groupby("day").agg(y=("y_spread", "mean"), q10=("q10", "mean"), q50=("q50", "mean"), q90=("q90", "mean"))
-                lo, hi = widen(D.q10, D.q50, D.q90, cal[name])
-                covp[name].append(((D.y >= lo) & (D.y <= hi)).values)
+            for (target, name), D in product_table(W).groupby(["target", "product"]):
+                lo, hi = widen(D.q10, D.q50, D.q90, cal.get(product_key(target, name)))
+                covp.setdefault(f"{target}_{name}", []).append(((D.y >= lo) & (D.y <= hi)).values)
         if cov:
             out["coverage80_calibrated"] = float(np.mean(np.concatenate(cov)))
-            for name in ("base", "peak"):
-                out[name]["coverage80_calibrated"] = float(np.mean(np.concatenate(covp[name])))
+            for key, v in covp.items():
+                out["products"][key]["coverage80_calibrated"] = float(np.mean(np.concatenate(v)))
     return out
 
 

@@ -1,12 +1,17 @@
-"""Write SCORECARD.md: cumulative and rolling skill of the issued forecasts against the hour-of-day climatology.
+"""Write SCORECARD.md: the forecast for tomorrow, the record so far and each day's forecast against the price that cleared, for the six
+daily products (base and peak of the DE price, the FR price and the DE-FR spread).
 
-Usage: python -m fbcast.report
+The record starts with the first forecast issued by the fundamentals model. Forecasts of the earlier, grid-only version stay in
+forecasts/ and scorecard/ and are not counted here.
+
+Usage: python -m fbcast.report           # SCORECARD.md
+       python -m fbcast.report --full    # scorecard/DIAGNOSTICS.md: hourly skill, binding probability, reliability (all versions)
 """
 import glob, json, os, sys
 import numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fbcast import model
-from fbcast.features import BLOCKS, product_forecast
+from fbcast.features import BLOCKS, product_forecast, daily_forecasts
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,7 +57,8 @@ def _chart(path, title, hours):
         return False
 
 
-def main():
+def full():
+    """The earlier, detailed report: hourly spread and binding skill against climatology, by block and by model. Not part of the daily run."""
     files = sorted(glob.glob(os.path.join(ROOT, "scorecard", "*.json")))
     bundle = model.load(os.path.join(ROOT, "models", "bundle.pkl"))
     clim = bundle["clim"]
@@ -283,8 +289,120 @@ def main():
         note = f"Last scoring run: {st['run_utc']} UTC." + (f" Awaiting scoring (retried each run): {', '.join(st['not_scored'])}." if st.get("not_scored") else " All published days scored.")
         lines.insert(2, note); lines.insert(3, ""); k = 4
     lines[k:k] = lines_top
-    open(os.path.join(ROOT, "SCORECARD.md"), "w").write("\n".join(lines) + "\n")
+    open(os.path.join(ROOT, "scorecard", "DIAGNOSTICS.md"), "w").write("\n".join(lines).replace("](scorecard/", "](") + "\n")
     print("\n".join(lines[:12]))
+
+
+PRODUCTS = (("DE_base", "DE base"), ("DE_peak", "DE peak"), ("FR_base", "FR base"), ("FR_peak", "FR peak"), ("spread_base", "DE−FR base"), ("spread_peak", "DE−FR peak"))
+
+
+def _px(key, x):
+    """Prices as whole euros, spreads with their sign."""
+    return (f"{x:+.0f}" if key.startswith("spread") else f"{x:.0f}").replace("-", "−")
+
+
+def _day(day, long=False):
+    t = pd.Timestamp(day)
+    return f"{t.strftime('%A')} {t.day} {t.strftime('%B %Y')}" if long else f"{t.strftime('%a')} {t.day} {t.strftime('%b')}"
+
+
+def _issued(fc):
+    """When a forecast was issued, in Central European time, and where that falls relative to gate closure and the results."""
+    t = pd.Timestamp(fc["issued_at_utc"]).tz_convert("Europe/Berlin")
+    when = f"{t.day} {t.strftime('%b')} at {t.strftime('%H:%M %Z')}"
+    if fc.get("status") == "late":
+        return f"Issued {when}, after the results were published: not counted."
+    if fc.get("issued_before_gate_closure"):
+        return f"Issued {when}, before the auction closed."
+    return f"Issued {when}, after gate closure and before the results were published."
+
+
+def main():
+    if "--full" in sys.argv:
+        return full()
+    fcs, scs = {}, {}
+    for fn in sorted(glob.glob(os.path.join(ROOT, "forecasts", "2*.json"))):
+        f = json.load(open(fn)); fcs[f["day"]] = f
+    for fn in sorted(glob.glob(os.path.join(ROOT, "scorecard", "2*.json"))):
+        sc = json.load(open(fn)); scs[sc["day"]] = sc
+    record = sorted(d for d, f in fcs.items() if (f.get("model") or {}).get("version", 1) >= 2)     # issued by the fundamentals model
+    counted = [scs[d] for d in record if d in scs and scs[d]["status"] == "ex-ante" and (scs[d].get("daily") or {}).get("DE_base")]
+    late = [d for d in record if (scs[d]["status"] if d in scs else fcs[d]["status"]) == "late"]
+    lines = ["# Scorecard: German and French day-ahead prices, base and peak", "",
+             "Forecasts of the German (DE-LU) and French day-ahead base and peak prices and of the DE−FR spread, issued every morning before the 12:00 CET auction "
+             "and scored the next day against the prices that cleared. Base is all hours of the day; peak is Monday to Friday, 08:00 to 20:00 CET.", ""]
+    st_fn = os.path.join(ROOT, "scorecard", "last_run.txt")
+    if os.path.exists(st_fn):
+        st = json.load(open(st_fn))
+        lines += [f"Last scoring run: {st['run_utc']} UTC." + (f" Awaiting scoring: {', '.join(st['not_scored'])}." if st.get("not_scored") else ""), ""]
+    # ---- the latest forecast ----
+    lf = fcs[max(fcs)] if fcs else None
+    if lf is not None and lf["day"] in record:
+        d = daily_forecasts(lf["hours"], lf["day"], (lf.get("model") or {}).get("product_cal"))
+        cell = lambda key: f"{_px(key, d[key]['p50'])} ({_px(key, d[key]['p10'])} to {_px(key, d[key]['p90'])})" if key in d else "–"
+        lines += [f"## Forecast for {_day(lf['day'], long=True)}", "", _issued(lf) + " €/MWh: the P50, with the P10 to P90 band in brackets.", "",
+                  "| | Base | Peak |", "| --- | --- | --- |"]
+        lines += [f"| {name} | {cell(t + '_base')} | {cell(t + '_peak')} |" for t, name in (("DE", "DE"), ("FR", "FR"), ("spread", "DE−FR"))]
+        if "DE_peak" not in d:
+            lines += ["", f"There is no peak product on a {pd.Timestamp(lf['day']).strftime('%A')}."]
+    elif lf is not None and record:
+        lines += [f"## Latest forecast: {_day(lf['day'], long=True)}", "", "This forecast was issued from the grid model alone, because the inputs of the price model were not on JAO in time. "
+                  "It carries no price forecast and is not part of the record."]
+    else:
+        lines += ["## Forecast", "", "The first forecast of this record has not been issued yet."]
+    # ---- the record ----
+    if record:
+        lines += ["", f"## Record since {_day(record[0], long=True)}: {len(counted)} day{'' if len(counted) == 1 else 's'} counted", ""]
+    if counted:
+        lines += ["| | Days | Error, €/MWh | Error of yesterday's price | In band |", "| --- | --- | --- | --- | --- |"]
+        for key, name in PRODUCTS:
+            V = [sc["daily"][key] for sc in counted if key in sc["daily"]]
+            if not V:
+                lines.append(f"| {name} | 0 | | | |"); continue
+            B = [abs(v["actual"] - v["prev_actual"]) for v in V if v.get("prev_actual") is not None]
+            lines.append(f"| {name} | {len(V)} | {np.mean([abs(v['actual'] - v['p50']) for v in V]):.1f} | {np.mean(B) if B else float('nan'):.1f} | {sum(v['in_band'] for v in V)} of {len(V)} |")
+        n_pre = sum(1 for sc in counted if sc.get("issued_before_gate_closure"))
+        lines += ["", "Error is the average absolute difference between the P50 and the price that cleared. The benchmark is the same error for a forecast that repeats the product's last delivered price: "
+                  "yesterday's for base, the previous weekday's for peak. In band counts the days on which the outcome fell inside the P10 to P90 band, which should be about four in five.", "",
+                  f"A forecast counts only if it was issued before the results were published; {n_pre} of the {len(counted)} were issued before the auction closed."
+                  + (f" Not counted, because issued late: {', '.join(_day(x) for x in late)}." if late else "")]
+        lines += ["", "## Day by day: forecast → price that cleared, €/MWh", "", "| Day | " + " | ".join(n for _, n in PRODUCTS) + " |", "| --- |" + " --- |" * len(PRODUCTS)]
+        out_of_band = False
+        for sc in sorted(counted, key=lambda x: x["day"], reverse=True)[:60]:
+            cells = []
+            for key, _ in PRODUCTS:
+                v = sc["daily"].get(key)
+                if v is None:
+                    cells.append("–"); continue
+                out_of_band |= not v["in_band"]
+                cells.append(f"{_px(key, v['p50'])} → {_px(key, v['actual'])}" + ("" if v["in_band"] else " *"))
+            lines.append(f"| {_day(sc['day'])} | " + " | ".join(cells) + " |")
+        if out_of_band:
+            lines += ["", "\\* The price cleared outside the P10 to P90 band."]
+        if len(counted) > 60:
+            lines += ["", "The 60 most recent days are shown; every day is in `scorecard/log.csv`."]
+    elif record:
+        waiting = [d for d in record if d not in scs]
+        lines += ["No day has been scored yet." + (f" The forecast for {_day(waiting[0])} is scored once its results are published." if waiting else "")
+                  + (f" Not counted, because issued late: {', '.join(_day(x) for x in late)}." if late else "")]
+    # ---- what to expect: the model's backtest ----
+    bj_fn = os.path.join(ROOT, "models", "bundle.json")
+    bt = (json.load(open(bj_fn)).get("fund") or {}).get("backtest") if os.path.exists(bj_fn) else None
+    if bt and bt.get("products"):
+        lines += ["", "## Backtest of the model", "",
+                  f"The live record above is the test that counts. This is what to expect from it: a walk-forward backtest from {_day(bt['days'][0])} {bt['days'][0][:4]} to {_day(bt['days'][1])} {bt['days'][1][:4]}, "
+                  "refitted every month, in which every forecast comes from a model that had seen nothing from its own month.", "",
+                  "| | Days | Average price | Error, €/MWh | Error of yesterday's price | In band |", "| --- | --- | --- | --- | --- | --- |"]
+        for key, name in PRODUCTS:
+            v = bt["products"].get(key)
+            if v:
+                cov = v.get("coverage80_calibrated")
+                lines.append(f"| {name} | {v['days']} | {_px(key, v['mean_actual'])} | {v['mae_p50']:.1f} | {v['mae_prev']:.1f} | {'n/a' if cov is None else format(cov, '.0%')} |")
+    lines += ["", "## Where things are", "",
+              "How the forecast is made: `README.md`. Each forecast as issued, hour by hour: `forecasts/`. Each day's score: `scorecard/`."
+              + (f" Forecasts issued before {_day(record[0])} {record[0][:4]} came from the first, grid-only version of this project; they remain in the same folders and are not part of this record." if record else "")]
+    open(os.path.join(ROOT, "SCORECARD.md"), "w").write("\n".join(lines) + "\n")
+    print("\n".join(lines[:16]))
 
 
 if __name__ == "__main__":

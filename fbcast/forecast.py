@@ -17,7 +17,7 @@ import argparse, hashlib, json, os, sys, time
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fbcast import data, model, fund
-from fbcast.features import domain_features, maxnp_features, BLOCKS, product_forecast
+from fbcast.features import domain_features, maxnp_features, BLOCKS, product_forecast, daily_forecasts
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -64,7 +64,7 @@ def rebuild_log():
     rows = []
     for fn in sorted(glob.glob(os.path.join(ROOT, "forecasts", "*.json"))):
         f = json.load(open(fn))
-        rows.append({"day": f["day"], "issued_at_utc": f["issued_at_utc"], "status": f["status"], **{k: v for k, v in f["summary"].items() if k not in ("blocks", "products")}})
+        rows.append({"day": f["day"], "issued_at_utc": f["issued_at_utc"], "status": f["status"], **{k: v for k, v in f["summary"].items() if k not in ("blocks", "products", "daily")}})
     if rows:
         pd.DataFrame(rows).to_csv(os.path.join(ROOT, "forecasts", "log.csv"), index=False)
 
@@ -162,7 +162,8 @@ def main():
                         "spread_p10": r1(B.spread_p10.mean()), "spread_p50": r1(B.spread_p50.mean()), "spread_p90": r1(B.spread_p90.mean())}
         if F is not None:
             blocks[name].update({"de_p50": r1(B.de_p50.mean()), "fr_p50": r1(B.fr_p50.mean())})
-    product_cal = {k: fm["cal"][k] for k in ("base", "peak") if fm and fm.get("cal", {}).get(k)} if F is not None else {}
+    # band factors of the daily products: "base" and "peak" for the spread, "DE_base", "FR_peak", ... for the prices
+    product_cal = {k: v for k, v in fm.get("cal", {}).items() if k.endswith(("base", "peak"))} if F is not None else {}
     meta = {"version": 2 if F is not None else 1, "trained_at": bundle.get("trained_at"), "train_days": bundle.get("train_days"), "bundle_sha256": model_sha, "rules": model.RULES,
             "spread_model": "fundamentals" if F is not None else "grid", "product_cal": product_cal}
     if F is not None:
@@ -183,6 +184,8 @@ def main():
     for k in ("base", "peak"):
         fc["summary"][f"{k}_spread_p50"] = round(prod[k]["p50"], 1) if k in prod else None
         fc["summary"][f"p_{k}_above_zero"] = round(prod[k]["p_pos"], 3) if k in prod else None
+    # the headline: base and peak of the DE price, the FR price and the DE-FR spread, each with its P10-P90 band
+    fc["summary"]["daily"] = {k: {kk: (round(vv, 1) if isinstance(vv, float) else vv) for kk, vv in v.items()} for k, v in daily_forecasts(hours, day, product_cal).items()}
     os.makedirs(os.path.join(ROOT, "forecasts"), exist_ok=True)
     json.dump(fc, open(out_fn, "w"), indent=1)
     rebuild_log()
