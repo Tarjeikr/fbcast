@@ -1,41 +1,62 @@
 name: forecast
 on:
   schedule:
-    # GitHub starts scheduled runs late. Every scheduled run of this repository from 4 to 19 Nov 2026 began 4.5 to 10.5 hours
-    # after its cron time, so a single slot at the right hour always missed the auction. Instead there is a slot every
-    # 30 minutes from 21:07 to 11:37 CET (20:07 to 10:37 UTC), and a run does not need to start at the right moment: any run that
-    # starts between 07:30 CET and gate closure waits for JAO to publish the domain (about 09:55 CET) and then issues.
-    # A run that starts before 07:30 CET, or after the day's forecast exists, stops at the first step and takes a few seconds.
-    - cron: "7,37 0-10,20-23 * * *"
-  workflow_dispatch:           # a run started by hand waits too: one tap any time after about 04:30 CET is enough
-concurrency:
-  group: forecast              # one run at a time, so two runs can never both issue the same day's forecast
-  cancel-in-progress: false
+    # GitHub starts the scheduled runs of this repository 4.5 to 10.5 hours after their cron time (every run from 4 to 21 Nov
+    # 2026), and seems to keep only one start waiting per line. So nothing here depends on a run starting at a given time:
+    # ANY run that starts after midnight CET, scheduled or by hand, waits for JAO to publish tomorrow's domain (about
+    # 09:55 CET) and then issues. A GitHub job may run for six hours, so a run that has waited 4 hours 45 minutes hands over
+    # to a fresh run. A run that finds the forecast issued, or an older run already waiting, stops by itself.
+    # With the delay, the lines from 18:37 to 00:37 UTC are the ones that start between midnight and the auction; the later
+    # ones are there in case GitHub starts runs on time again. Times are UTC.
+    - cron: "37 18 * * *"
+    - cron: "7 20 * * *"
+    - cron: "37 21 * * *"
+    - cron: "7 23 * * *"
+    - cron: "37 0 * * *"
+    - cron: "7 2 * * *"
+    - cron: "37 3 * * *"
+    - cron: "7 5 * * *"
+    - cron: "37 6 * * *"
+    - cron: "7 8 * * *"
+    - cron: "37 9 * * *"
+  workflow_dispatch:           # a run started by hand behaves exactly like a scheduled one
 permissions:
-  contents: write
+  contents: write              # commit the forecast
+  actions: write               # see which runs of this workflow are going, and start the next one at a hand-over
 jobs:
   forecast:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: is there anything to do?
         id: gate
-        env:
-          EVENT: ${{ github.event_name }}
         run: |
           day=$(TZ=Europe/Berlin date -d tomorrow +%F)
-          hhmm=$(TZ=Europe/Berlin date +%H%M)
+          echo "day=$day" >> "$GITHUB_OUTPUT"
           if [ -f "forecasts/$day.json" ]; then
             echo "forecast for $day already issued; nothing to do"
             echo "go=false" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT" = "schedule" ] && [ "$((10#$hhmm))" -lt 730 ]; then
-            echo "$hhmm CET is too early for $day: JAO publishes the domain at about 09:55 CET"
-            echo "go=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "forecast for $day wanted (started $hhmm CET)"
-            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # One waiting run is enough. If an older run of this workflow is still going three minutes from now, it is waiting
+          # for JAO, and the forecast is left to it. (A run that has just handed over to this one ends within seconds.)
+          # If GitHub cannot be asked, this run goes ahead: two runs waiting do no harm, an issued forecast is never replaced.
+          go=true
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            older=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow forecast.yml --limit 40 --json databaseId,status \
+                      -q "[.[] | select(.status != \"completed\" and .databaseId < $GITHUB_RUN_ID)] | length" 2>/dev/null || echo 0)
+            if [ "${older:-0}" = "0" ]; then break; fi
+            if [ "$i" = 10 ]; then go=false; else sleep 20; fi
+          done
+          if [ "$go" = true ]; then
+            echo "forecast for $day wanted (this run started $(TZ=Europe/Berlin date +%H:%M) CET)"
+          else
+            echo "an older run of this workflow is already waiting for JAO; the forecast for $day is left to it"
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         if: steps.gate.outputs.go == 'true'
         with:
@@ -43,40 +64,50 @@ jobs:
       - if: steps.gate.outputs.go == 'true'
         run: pip install -r requirements.txt opentimestamps-client
       - name: wait until JAO has published the domain for tomorrow
-        if: steps.gate.outputs.go == 'true'
-        run: |
-          python - <<'PY'
-          import sys, time
-          import pandas as pd
-          from fbcast import data
-          day = (pd.Timestamp.now(tz="Europe/Berlin") + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-          deadline = time.time() + 330 * 60
-          while True:
-              try:
-                  ok, when = data.domain_published(day)
-              except Exception as e:
-                  ok, when = False, None
-                  print("JAO not answering (%s); will ask again" % type(e).__name__, flush=True)
-              if ok:
-                  print("domain for", day, "is on JAO, published", when, flush=True)
-                  sys.exit(0)
-              if time.time() > deadline:
-                  print("domain for", day, "not published within 330 minutes; giving up", flush=True)
-                  sys.exit(2)
-              print(pd.Timestamp.now(tz="Europe/Berlin").strftime("%H:%M CET"), "domain for", day, "not on JAO yet", flush=True)
-              time.sleep(240)
-          PY
-      - name: pick up what was committed during the wait (a retrained model, or a forecast issued by another run)
-        if: steps.gate.outputs.go == 'true'
-        run: git pull --ff-only origin "$GITHUB_REF_NAME" || echo "could not refresh the checkout; continuing with the files as checked out"
-      - if: steps.gate.outputs.go == 'true'
-        run: python -m fbcast.forecast --wait-minutes 40
-      - name: stamp the forecast on the Bitcoin blockchain (OpenTimestamps)
-        if: steps.gate.outputs.go == 'true'
-        run: |
-          for f in $(git ls-files --others --exclude-standard forecasts | grep '\.json$'); do ots stamp "$f" || true; done
-      - name: commit through the GitHub API, so the commit is signed by GitHub
+        id: wait
         if: steps.gate.outputs.go == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/api-commit.sh "forecast $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard forecasts) $(git diff --name-only forecasts)
+          DAY: ${{ steps.gate.outputs.day }}
+        # 285 minutes of waiting leave an hour of the job's 350 for issuing; the step fails only if JAO has not published
+        # by 14:00 CET, when the auction has long cleared
+        run: python -m fbcast.wait --day "$DAY" --minutes 285 --every 120
+      - name: hand over to a fresh run (JAO has not published yet and this run has used its time)
+        if: steps.wait.outputs.outcome == 'handover'
+        run: |
+          for attempt in 1 2 3; do
+            if gh workflow run forecast.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"; then
+              echo "started the next run; it takes over the waiting"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "could not start the next run; the next scheduled run has to pick the forecast up" >&2
+          exit 1
+      - name: pick up what was committed during the wait (a retrained model, or a forecast issued by another run)
+        if: steps.wait.outputs.outcome == 'issue'
+        run: git pull --ff-only origin "$GITHUB_REF_NAME" || echo "could not refresh the checkout; continuing with the files as checked out"
+      - name: issue the forecast
+        if: steps.wait.outputs.outcome == 'issue'
+        env:
+          DAY: ${{ steps.gate.outputs.day }}
+        run: python -m fbcast.forecast --day "$DAY" --wait-minutes 40
+      - name: stamp the forecast on the Bitcoin blockchain (OpenTimestamps)
+        if: steps.wait.outputs.outcome == 'issue'
+        run: |
+          for f in $(git ls-files --others --exclude-standard -- forecasts | grep '\.json$'); do ots stamp "$f" || true; done
+      - name: commit through the GitHub API, so the commit is signed by GitHub
+        if: steps.wait.outputs.outcome == 'issue'
+        run: |
+          # each list on its own line: if git fails, the step fails, instead of committing nothing and looking fine
+          new=$(git ls-files --others --exclude-standard -- forecasts)    # the forecast and its timestamp proof
+          changed=$(git diff --name-only -- forecasts)                      # forecasts/log.csv
+          msg="forecast $(date -u +%Y-%m-%dT%H:%MZ)"
+          rc=0
+          CREATE_ONLY=1 bash .github/api-commit.sh "$msg" $new || rc=$?
+          if [ "$rc" = 0 ]; then
+            bash .github/api-commit.sh "$msg" $changed
+          elif [ "$rc" = 3 ]; then
+            echo "another run has issued this forecast already; this run's copy is discarded"
+          else
+            exit "$rc"
+          fi

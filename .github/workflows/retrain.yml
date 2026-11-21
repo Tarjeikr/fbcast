@@ -1,8 +1,15 @@
 name: retrain
 on:
   schedule:
-    - cron: "17 3 * * 1"   # Mondays. GitHub starts scheduled runs hours late; nothing here depends on the exact time.
-  workflow_dispatch:
+    # The models are retrained once a week. GitHub starts scheduled runs hours late and can drop one, so there are two lines
+    # a day and the run decides for itself whether a retrain is due: no price model yet, a model 6.5 days old, or a change in
+    # requirements.txt. If none is due it stops after about a minute. Times are UTC.
+    - cron: "17 3 * * *"
+    - cron: "47 15 * * *"
+  workflow_dispatch:           # a run started by hand always retrains
+concurrency:
+  group: retrain               # one retrain at a time
+  cancel-in-progress: false
 permissions:
   contents: write
 jobs:
@@ -14,22 +21,45 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: is a retrain due?
+        id: due
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            why="started by hand"
+          else
+            why=$(python -m fbcast.train --due) || why="the check itself failed, so retrain to be safe"
+          fi
+          if [ -n "$why" ]; then
+            echo "retraining: $why"
+          else
+            echo "no retrain due: the price model is there, less than a week old, and trained with the libraries in requirements.txt"
+          fi
+          echo "why=$why" >> "$GITHUB_OUTPUT"
+      # Restored on every run, also when no retrain is due: GitHub deletes a cache that has not been read for seven days.
       - name: reuse the downloaded history (JAO two-day windows, closed price years) from the previous run
         uses: actions/cache/restore@v4
         with:
           path: data
           key: fbcast-data-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: fbcast-data-
-      - run: pip install -r requirements.txt
       # Grid model: history from 1 Sep 2026. Fundamentals model: all history since June 2022, with a twelve-month walk-forward
       # backtest. The first run downloads about 4,000 small JAO windows (some ten minutes); later runs only the new days.
-      - run: python -m fbcast.train
+      - if: steps.due.outputs.why != ''
+        run: python -m fbcast.train
       - name: commit through the GitHub API, so the commit is signed by GitHub
+        if: steps.due.outputs.why != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/api-commit.sh "retrain $(date -u +%Y-%m-%dT%H:%MZ)" $(git diff --name-only models) $(git ls-files --others --exclude-standard models)
+        run: |
+          # each list on its own line, so that the step fails if git does; "--" tells git that what follows are paths
+          changed=$(git diff --name-only -- models)
+          new=$(git ls-files --others --exclude-standard -- models)
+          bash .github/api-commit.sh "retrain $(date -u +%Y-%m-%dT%H:%MZ)" $changed $new
       - name: keep the downloaded history for the next run, also when this one stopped part-way
-        if: always()
+        if: always() && steps.due.outputs.why != ''
         uses: actions/cache/save@v4
         with:
           path: data

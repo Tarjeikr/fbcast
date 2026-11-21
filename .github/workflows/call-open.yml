@@ -75,8 +75,12 @@ jobs:
             --size "$SIZE" --price "$PRICE" --source "$SOURCE" --rationale "$RATIONALE" --target "$target" --stop "$stop"
       - name: stamp the call on the Bitcoin blockchain (OpenTimestamps)
         run: |
-          for f in $(git ls-files --others --exclude-standard book/calls | grep '\.json$'); do ots stamp "$f" || true; done
+          for f in $(git ls-files --others --exclude-standard -- book/calls | grep '\.json$'); do ots stamp "$f" || true; done
       - name: commit through the GitHub API, so the commit is signed by GitHub
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/api-commit.sh "call $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard book BOOK.md) $(git diff --name-only book BOOK.md)
+        run: |
+          # each list on its own line, so that the step fails if git does; "--" tells git that what follows are paths
+          new=$(git ls-files --others --exclude-standard -- book BOOK.md)
+          changed=$(git diff --name-only -- book BOOK.md)
+          bash .github/api-commit.sh "call $(date -u +%Y-%m-%dT%H:%MZ)" $new $changed

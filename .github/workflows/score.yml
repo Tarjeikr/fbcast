@@ -1,7 +1,12 @@
 name: score
 on:
   schedule:
-    - cron: "30 13 * * *"  # 14:30 CET: day-ahead results are on JAO from about 13:00 CET
+    # The day-ahead results are on JAO from about 13:05 CET. GitHub starts the scheduled runs of this repository 4.5 to 10.5
+    # hours after their cron time (see forecast.yml), so there are three lines: the first run to start after the results does
+    # the scoring; a run that finds nothing new to score only refreshes the "last scoring run" line. Times are UTC.
+    - cron: "37 7 * * *"
+    - cron: "30 13 * * *"
+    - cron: "37 17 * * *"
   workflow_dispatch:
 permissions:
   contents: write
@@ -23,4 +28,10 @@ jobs:
       - name: commit through the GitHub API, so the commit is signed by GitHub
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/api-commit.sh "score $(date -u +%Y-%m-%dT%H:%MZ)" $(git ls-files --others --exclude-standard scorecard forecasts BOOK.md) $(git diff --name-only scorecard forecasts SCORECARD.md BOOK.md book)
+        run: |
+          # Each list on its own line: if git fails, the step fails. (Until 21 Nov 2026 both lists were built inside the
+          # command itself; git stopped at the folder book/, which does not exist before the first call, the list came out
+          # empty and the run committed nothing while looking fine.) "--" tells git that what follows are paths.
+          new=$(git ls-files --others --exclude-standard -- scorecard forecasts BOOK.md)
+          changed=$(git diff --name-only -- scorecard forecasts book SCORECARD.md BOOK.md)
+          bash .github/api-commit.sh "score $(date -u +%Y-%m-%dT%H:%MZ)" $new $changed
