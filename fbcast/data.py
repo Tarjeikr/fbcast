@@ -77,9 +77,45 @@ def load_days(ds, days, workers=4):
     return df
 
 
+FR_FROM_JAO = set()   # CET days whose French price was rebuilt from JAO's price spread by this process; the scorer records it
+
+
+def fill_fr_from_jao(df, max_days=40):
+    """Where the price feed has the DE-LU price but not the French one, rebuild the French price from JAO's published price
+    spread: `border_FR_DE` in the priceSpread dataset is the DE price minus the FR price, to the cent (checked on every
+    quarter-hour of 18 to 20 Nov 2026). The French series went missing from the feed for delivery day 21 Nov 2026 while the
+    German one was there. Only the `max_days` most recent days with a gap are filled; older gaps stay gaps."""
+    if df is None or df.empty or "FR" not in df or "DE" not in df:
+        return df
+    miss = df[df.DE.notna() & df.FR.isna()]
+    if miss.empty:
+        return df
+    days = sorted(set(miss.t.dt.tz_convert("Europe/Berlin").dt.strftime("%Y-%m-%d")))[-max_days:]
+    rows = []
+    for day in days:
+        try:
+            rows += fetch_day("priceSpread", day)[0]
+        except Exception as e:
+            print(f"JAO price spread for {day} not available ({type(e).__name__}); the French price for that day stays missing", flush=True)
+    rows = [r for r in rows if r.get("border_FR_DE") is not None]
+    if not rows:
+        return df
+    J = pd.DataFrame(rows)
+    J = pd.DataFrame({"t": pd.to_datetime(J.dateTimeUtc, utc=True), "de_minus_fr": pd.to_numeric(J.border_FR_DE, errors="coerce")}).drop_duplicates("t")
+    df = df.merge(J, on="t", how="left")
+    fill = df.FR.isna() & df.DE.notna() & df.de_minus_fr.notna()
+    if fill.any():
+        df.loc[fill, "FR"] = (df.DE - df.de_minus_fr)[fill].round(2)
+        filled = sorted(set(df.t[fill].dt.tz_convert("Europe/Berlin").dt.strftime("%Y-%m-%d")))
+        FR_FROM_JAO.update(filled)
+        print(f"French prices for {', '.join(filled)} taken from JAO's price spread ({int(fill.sum())} values): the price feed did not have them", flush=True)
+    return df.drop(columns="de_minus_fr")
+
+
 def fetch_prices(start, end, zones=("DE-LU", "FR")):
     """Day-ahead prices from energy-charts (SMARD), native resolution, as a DataFrame with columns t, DE, FR.
-    The API rate-limits shared addresses (HTTP 429), so requests back off patiently and honour Retry-After."""
+    The API rate-limits shared addresses (HTTP 429), so requests back off patiently and honour Retry-After.
+    A zone the feed has nothing for in the whole range (HTTP 404) comes back empty; French gaps are filled from JAO."""
     out = None
     for bzn in zones:
         col = "DE" if bzn == "DE-LU" else bzn
@@ -87,18 +123,23 @@ def fetch_prices(start, end, zones=("DE-LU", "FR")):
         for a in range(7):
             try:
                 r = _S.get(PRICES, params={"bzn": bzn, "start": start, "end": end}, timeout=120)
-                if r.status_code == 200:
+                if r.status_code in (200, 404):
                     break
                 wait = int(r.headers.get("Retry-After", 0) or 0) or min(120, 20 * 2 ** a)
             except Exception:
                 wait = min(120, 20 * 2 ** a)
             time.sleep(wait)
-        r.raise_for_status()
-        j = r.json()
-        d = pd.DataFrame({"t": pd.to_datetime(j["unix_seconds"], unit="s", utc=True), col: j["price"]})
+        if r is None:
+            raise RuntimeError(f"energy-charts did not answer for {bzn} {start}..{end}")
+        if r.status_code == 404 and col != "DE":
+            d = pd.DataFrame({"t": pd.Series([], dtype="datetime64[ns, UTC]"), col: pd.Series([], dtype=float)})
+        else:
+            r.raise_for_status()
+            j = r.json()
+            d = pd.DataFrame({"t": pd.to_datetime(j["unix_seconds"], unit="s", utc=True), col: j["price"]})
         out = d if out is None else out.merge(d, on="t", how="outer")
         time.sleep(5)
-    return out.sort_values("t").dropna().reset_index(drop=True)
+    return fill_fr_from_jao(out).sort_values("t").dropna().reset_index(drop=True)
 
 
 def results_published(day):
@@ -220,5 +261,5 @@ def load_prices_long(start, end, zones=("DE-LU", "FR")):
         d = pd.concat(frames).drop_duplicates("t")
         out = d if out is None else out.merge(d, on="t", how="outer")
     lo, _ = day_bounds(start); _, hi = day_bounds(end)
-    out = out[(out.t >= lo) & (out.t < hi)]
+    out = fill_fr_from_jao(out[(out.t >= lo) & (out.t < hi)])
     return out.sort_values("t").dropna().reset_index(drop=True)

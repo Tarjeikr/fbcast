@@ -170,6 +170,8 @@ def full():
     fb = (bundle.get("fund") or {}).get("backtest")
     if fb:
         fm = bundle["fund"]
+        nan = float("nan")
+        sb, sp = (fb.get("products") or {}).get("spread_base") or {}, (fb.get("products") or {}).get("spread_peak") or {}   # daily base and peak of the DE-FR spread
         lines += ["", "## Fundamentals model and its backtest", "",
                   f"Gradient-boosted quantile models on JAO's pre-coupling publication for the target day (the TSOs' D-2 congestion forecast of vertical load, generation and Core net positions; "
                   f"reference programmes on the non-Core borders; maximum net positions and bilateral exchanges) and on the day-ahead results up to the day before; "
@@ -180,11 +182,11 @@ def full():
                   f"| P50 absolute error, €/MWh | {fb['mae_p50']:.1f} | {fb['mae_clim']:.1f} | {fb['mae_persistence']:.1f} | {fb['mae_zero']:.1f} |",
                   f"| Sign Brier score | {fb['sign_brier']:.3f} | {fb['sign_brier_clim']:.3f} | | |",
                   f"| Sign hit rate | {fb['sign_hit']:.0%} | {fb['sign_hit_clim']:.0%} | | |", "",
-                  f"Daily base spread: P50 error {fb['base']['mae_p50']:.1f} €/MWh against {fb['base']['mae_persistence']:.1f} for yesterday's value and {fb['base']['mae_clim']:.1f} for climatology; "
-                  f"sign right on {fb['base']['sign_hit']:.0%} of days. Peak: {fb['peak']['mae_p50']:.1f} against {fb['peak']['mae_persistence']:.1f} and {fb['peak']['mae_clim']:.1f}. "
-                  f"Prices: DE P50 error {fb['DE']['mae_p50']:.1f} €/MWh against {fb['DE']['mae_persistence']:.1f} for yesterday's price, FR {fb['FR']['mae_p50']:.1f} against {fb['FR']['mae_persistence']:.1f}. "
+                  f"Daily base spread: P50 error {sb.get('mae_p50', nan):.1f} €/MWh against {sb.get('mae_prev', nan):.1f} for yesterday's value; sign right on {sb.get('sign_hit', nan):.0%} of days. "
+                  f"Peak: {sp.get('mae_p50', nan):.1f} against {sp.get('mae_prev', nan):.1f} for the previous weekday's. "
+                  f"Hourly prices: DE P50 error {fb['DE']['mae_p50']:.1f} €/MWh against {fb['DE']['mae_persistence']:.1f} for yesterday's price, FR {fb['FR']['mae_p50']:.1f} against {fb['FR']['mae_persistence']:.1f}. "
                   f"The raw 80% bands covered {fb['coverage80_raw']:.0%} of hours; with the band-width calibration a live forecast would have had at each date (factors from earlier days only), "
-                  f"{fb.get('coverage80_calibrated', float('nan')):.0%} of hours, {fb['base'].get('coverage80_calibrated', float('nan')):.0%} of daily base and {fb['peak'].get('coverage80_calibrated', float('nan')):.0%} of daily peak outcomes."]
+                  f"{fb.get('coverage80_calibrated', nan):.0%} of hours, {sb.get('coverage80_calibrated', nan):.0%} of daily base and {sp.get('coverage80_calibrated', nan):.0%} of daily peak outcomes."]
     if bt:
         lines += ["", "## Grid model and its backtest", "", f"Logistic models on the D-1 published Core domain (Creys–St-Vulbas RAM, loading and minRAM top-up, French max net positions) plus hour-of-day climatology; "
                   f"trained on {bundle['train_days'][0]} to {bundle['train_days'][1]} ({bundle['n_train']} hour-rows). Held-out backtest {bt['days'][0]} to {bt['days'][1]}: "
@@ -390,7 +392,8 @@ def main():
     bt = (json.load(open(bj_fn)).get("fund") or {}).get("backtest") if os.path.exists(bj_fn) else None
     if bt and bt.get("products"):
         lines += ["", "## Backtest of the model", "",
-                  f"The live record above is the test that counts. This is what to expect from it: a walk-forward backtest from {_day(bt['days'][0])} {bt['days'][0][:4]} to {_day(bt['days'][1])} {bt['days'][1][:4]}, "
+                  ("The live record above is the test that counts." if record else "The live record is the test that counts, once it has started.")
+                  + f" This is what to expect from it: a walk-forward backtest from {_day(bt['days'][0])} {bt['days'][0][:4]} to {_day(bt['days'][1])} {bt['days'][1][:4]}, "
                   "refitted every month, in which every forecast comes from a model that had seen nothing from its own month.", "",
                   "| | Days | Average price | Error, €/MWh | Error of yesterday's price | In band |", "| --- | --- | --- | --- | --- | --- |"]
         for key, name in PRODUCTS:
@@ -400,7 +403,8 @@ def main():
                 lines.append(f"| {name} | {v['days']} | {_px(key, v['mean_actual'])} | {v['mae_p50']:.1f} | {v['mae_prev']:.1f} | {'n/a' if cov is None else format(cov, '.0%')} |")
     lines += ["", "## Where things are", "",
               "How the forecast is made: `README.md`. Each forecast as issued, hour by hour: `forecasts/`. Each day's score: `scorecard/`."
-              + (f" Forecasts issued before {_day(record[0])} {record[0][:4]} came from the first, grid-only version of this project; they remain in the same folders and are not part of this record." if record else "")]
+              + (f" Forecasts issued before {_day(record[0])} {record[0][:4]} came from the first, grid-only version of this project; they remain in the same folders and are not part of this record." if record
+                 else " The forecasts already in those folders came from the first, grid-only version of this project and are not part of this record." if fcs else "")]
     open(os.path.join(ROOT, "SCORECARD.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines[:16]))
 

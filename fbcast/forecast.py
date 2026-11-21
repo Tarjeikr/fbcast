@@ -13,7 +13,7 @@ The script refuses to produce a countable forecast if the day-ahead results for 
 written with status "late" and is excluded from the scorecard). With --wait-minutes it polls until the final domain appears
 or the time runs out, so a scheduled run can start before the publication and wait for it.
 """
-import argparse, hashlib, json, os, sys, time
+import argparse, hashlib, json, os, sys, time, traceback
 import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fbcast import data, model, fund
@@ -33,7 +33,7 @@ def features_for_day(day):
     if fc.empty or mx.empty:
         return None
     X = domain_features(fc).merge(maxnp_features(mx), on=["day", "hour"], how="left")
-    X["wd"] = pd.to_datetime(X.day).dt.weekday
+    X["wd"] = pd.to_datetime(X.day).dt.day_of_week
     X["weekend"] = (X.wd >= 5).astype(int)
     return X
 
@@ -69,19 +69,10 @@ def rebuild_log():
         pd.DataFrame(rows).to_csv(os.path.join(ROOT, "forecasts", "log.csv"), index=False)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--day", default=(pd.Timestamp.now(tz="Europe/Berlin") + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
-    ap.add_argument("--wait-minutes", type=int, default=0)
-    ap.add_argument("--force", action="store_true", help="overwrite an existing forecast file")
-    a = ap.parse_args()
-    day = a.day
-    out_fn = os.path.join(ROOT, "forecasts", f"{day}.json")
-    if os.path.exists(out_fn) and not a.force:
-        print("forecast for", day, "already issued; nothing to do")
-        rebuild_log()
-        return
-    deadline = time.time() + 60 * a.wait_minutes
+def issue(day, out_fn, wait_minutes, use_price_model=True):
+    """Build the forecast for `day` and write it to `out_fn`. Writing the file is the last thing it does, so if it raises,
+    nothing has been written."""
+    deadline = time.time() + 60 * wait_minutes
     while True:
         try:
             ok, dom_mod = data.domain_published(day)
@@ -96,7 +87,7 @@ def main():
         if time.time() > deadline:
             print("domain for", day, "not published yet; giving up")
             sys.exit(2)
-        time.sleep(300)
+        time.sleep(60)
     bundle_path = os.path.join(ROOT, "models", "bundle.pkl")
     bundle = model.load(bundle_path)
     model_sha = hashlib.sha256(open(bundle_path, "rb").read()).hexdigest()
@@ -118,16 +109,22 @@ def main():
         sys.exit(2)
     # fundamentals model: the forecast of record for the spread, its sign and the two prices whenever its inputs are available
     F = None
-    fm = bundle.get("fund")
+    fm = bundle.get("fund") if use_price_model else None
     if fm:
-        Xf = fundamentals_for_day(day, deadline)
-        if Xf is not None:
-            F = fund.predict(fm, Xf).set_index("hour")
-            if F[["q10", "q50", "q90", "p_pos"]].isna().any().any() or not set(P.hour).issubset(F.index):
-                print("fundamentals forecast incomplete for", day, "; issuing from the grid model alone", flush=True)
-                F = None
-        else:
-            print("fundamentals inputs not available in time for", day, "; issuing from the grid model alone", flush=True)
+        try:
+            Xf = fundamentals_for_day(day, deadline)
+            if Xf is None:
+                print("fundamentals inputs not available in time for", day, "; issuing from the grid model alone", flush=True)
+            else:
+                F = fund.predict(fm, Xf).set_index("hour")
+                need = ["q10", "q50", "q90", "p_pos", "de_q10", "de_q50", "de_q90", "fr_q10", "fr_q50", "fr_q90"]
+                if F[need].isna().any().any() or not set(P.hour).issubset(F.index):
+                    print("fundamentals forecast incomplete for", day, "; issuing from the grid model alone", flush=True)
+                    F = None
+        except Exception as e:  # whatever goes wrong in the price model, a forecast from the grid model still goes out on time
+            traceback.print_exc()
+            print("the price model failed (%s); issuing from the grid model alone" % type(e).__name__, flush=True)
+            F = None
     # status is settled as late as possible: it compares the moment of issue with the publication of the results
     try:
         published, res_mod = data.results_published(day)
@@ -186,9 +183,35 @@ def main():
         fc["summary"][f"p_{k}_above_zero"] = round(prod[k]["p_pos"], 3) if k in prod else None
     # the headline: base and peak of the DE price, the FR price and the DE-FR spread, each with its P10-P90 band
     fc["summary"]["daily"] = {k: {kk: (round(vv, 1) if isinstance(vv, float) else vv) for kk, vv in v.items()} for k, v in daily_forecasts(hours, day, product_cal).items()}
+    text = json.dumps(fc, indent=1)   # serialised before the file is opened: a failure here leaves no half-written forecast behind
     os.makedirs(os.path.join(ROOT, "forecasts"), exist_ok=True)
-    json.dump(fc, open(out_fn, "w"), indent=1)
-    rebuild_log()
+    with open(out_fn, "w") as fh:
+        fh.write(text)
+    return fc
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--day", default=(pd.Timestamp.now(tz="Europe/Berlin") + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+    ap.add_argument("--wait-minutes", type=int, default=0)
+    ap.add_argument("--force", action="store_true", help="overwrite an existing forecast file")
+    a = ap.parse_args()
+    day = a.day
+    out_fn = os.path.join(ROOT, "forecasts", f"{day}.json")
+    if os.path.exists(out_fn) and not a.force:
+        print("forecast for", day, "already issued; nothing to do")
+        rebuild_log()
+        return
+    try:
+        fc = issue(day, out_fn, a.wait_minutes)
+    except Exception:  # not SystemExit: "domain not published" and "data incomplete" still end the run
+        traceback.print_exc()
+        print("building the forecast failed (see above); trying once more from the grid model alone", flush=True)
+        fc = issue(day, out_fn, a.wait_minutes, use_price_model=False)
+    try:
+        rebuild_log()
+    except Exception as e:
+        print("forecasts/log.csv could not be rebuilt (%s); the forecast file itself is written" % type(e).__name__, flush=True)
     print(json.dumps({k: v for k, v in fc.items() if k != "hours"}, indent=1))
 
 

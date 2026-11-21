@@ -98,7 +98,7 @@ def load_json_days(folder, prefix):
 def hour_index(t):
     """CET day and hour for UTC timestamps."""
     lt = t.dt.tz_convert(TZ)
-    return pd.DataFrame({"day": lt.dt.strftime("%Y-%m-%d"), "hour": lt.dt.hour, "wd": lt.dt.weekday}, index=t.index)
+    return pd.DataFrame({"day": lt.dt.strftime("%Y-%m-%d"), "hour": lt.dt.hour, "wd": lt.dt.day_of_week}, index=t.index)
 
 
 def domain_features(fc):
@@ -169,7 +169,7 @@ def build(fc, mx, sp, npos, prices):
     dm = real.groupby("day").agg(spread_l1_day=("spread", "mean"), bind_l1_day=("bind", "mean"), fr_np_l1_day=("hub_FR", "mean")).reset_index()
     dm["day"] = (pd.to_datetime(dm.day) + pd.Timedelta(days=1)).dt.strftime("%Y-%m-%d")
     X = X.merge(lag, on=["day", "hour"], how="left").merge(lag7, on=["day", "hour"], how="left").merge(dm, on="day", how="left")
-    X["wd"] = pd.to_datetime(X.day).dt.weekday
+    X["wd"] = pd.to_datetime(X.day).dt.day_of_week
     X["weekend"] = (X.wd >= 5).astype(int)
     X["afternoon"] = X.hour.between(13, 19).astype(int)
     X["night"] = X.hour.isin([21, 22, 23, 0, 1, 2]).astype(int)

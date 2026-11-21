@@ -37,6 +37,13 @@ TARGETS = ("spread", "DE", "FR")
 # walk-forward this was level with a raw target on average and clearly better when the price level shifted (November 2026).
 # The two price levels are modelled raw: scaling them by their own weekly mean made them worse in the same test.
 SCALE = {"spread": "lvl_m7", "DE": None, "FR": None}
+# Each price is forecast twice and the two sets of quantiles are averaged: once as a level, and once as the change from
+# yesterday's price at the same hour. Trees cannot forecast a level they have not seen, and from late October 2026 prices sat
+# far above the history: the level model alone ran about 18 EUR/MWh low on the German base price in October and November 2026.
+# In the walk-forward test the average was the best of the variants tried on the validation months (November 2025 to May 2026)
+# and, on the months after, cut the German base error from 18.2 to 16.8 and the French from 19.0 to 17.6 EUR/MWh.
+# An anchor that is missing for an hour (no price yesterday) drops out, and the level model stands alone for that hour.
+ANCHORS = {"spread": (None,), "DE": (None, "DE_l1"), "FR": (None, "FR_l1")}
 GBM = dict(learning_rate=0.1, max_iter=120, max_leaf_nodes=16, min_samples_leaf=60, l2_regularization=1.0, early_stopping=False, random_state=0)
 CAL_DAYS, CAL_DAYS_PRODUCT = 90, 180                                 # out-of-sample days used to calibrate the band widths
 OUTCOMES = ["DE", "FR", "spread", "hub_DE", "hub_FR"]
@@ -124,7 +131,7 @@ def make(T):
     L1.index = (pd.to_datetime(L1.index) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")   # everything here describes days up to D-1
     X = X.merge(L1.rename_axis("day").reset_index(), on="day", how="left")
     X["lvl_m7"] = np.maximum(X.DE_m7.abs(), X.FR_m7.abs())
-    X["wd"] = pd.to_datetime(X.day).dt.weekday
+    X["wd"] = pd.to_datetime(X.day).dt.day_of_week
     X["weekend"] = (X.wd >= 5).astype(int)
     return X.merge(R[["day", "hour"] + OUTCOMES], on=["day", "hour"], how="left")
 
@@ -153,11 +160,22 @@ def fit(X, feats=None):
     for target in TARGETS:
         tr = X.dropna(subset=[target]); s = _scale(tr, target); ok = np.isfinite(s)
         tr, s = tr[ok], s[ok]
-        out["q"][target] = {tau: HistGradientBoostingRegressor(loss="quantile", quantile=tau, **GBM).fit(tr[feats], tr[target].values / s) for tau in QS}
+        out["q"][target] = []
+        for anchor in ANCHORS[target]:
+            a = tr[anchor].values.astype(float) if anchor else np.zeros(len(tr))
+            use = np.isfinite(a)
+            y = (tr[target].values[use] - a[use]) / s[use]
+            out["q"][target].append({"anchor": anchor, "models": {tau: HistGradientBoostingRegressor(loss="quantile", quantile=tau, **GBM).fit(tr[feats][use], y) for tau in QS}})
     tr = X.dropna(subset=["spread"])
     out["sign"] = HistGradientBoostingClassifier(**GBM).fit(tr[feats], (tr.spread > 0).astype(int))
     out["n_train"] = int(len(tr))
     return out
+
+
+def _components(m, target):
+    """The quantile models of a target: one set per anchor. A model saved before anchors existed is a single level model."""
+    c = m["q"][target]
+    return c if isinstance(c, list) else [{"anchor": None, "models": c}]
 
 
 def predict_raw(m, X):
@@ -166,7 +184,14 @@ def predict_raw(m, X):
     for target in TARGETS:
         s = _scale(X, target)
         s = np.where(np.isfinite(s), s, np.nan)
-        Q = np.sort(np.vstack([m["q"][target][tau].predict(X[m["features"]]) * s for tau in QS]), axis=0)
+        parts = []
+        for c in _components(m, target):
+            a = X[c["anchor"]].values.astype(float) if c["anchor"] else 0.0
+            # the three quantiles are fitted separately and can cross; each set is put in order before the sets are averaged
+            parts.append(np.sort(np.vstack([c["models"][tau].predict(X[m["features"]]) * s + a for tau in QS]), axis=0))
+        parts = np.stack(parts)                                      # component x quantile x hour
+        n = np.isfinite(parts).sum(axis=0)
+        Q = np.where(n > 0, np.nansum(parts, axis=0) / np.maximum(n, 1), np.nan)   # the average over the components that have a value
         pre = "" if target == "spread" else target.lower() + "_"
         P[pre + "q10"], P[pre + "q50"], P[pre + "q90"] = Q[0], Q[1], Q[2]
     P["p_pos"] = m["sign"].predict_proba(X[m["features"]])[:, 1]
@@ -339,6 +364,7 @@ def train(end, start=START, backtest_months=12, log=print):
     m["cal"] = calibration(P)
     m["backtest"] = summary(P)
     m["gbm"] = GBM
+    m["anchors"] = {t: list(a) for t, a in ANCHORS.items()}
     return m
 
 

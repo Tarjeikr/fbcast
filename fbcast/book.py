@@ -63,7 +63,7 @@ def delivery_hours(first, last, profile="base"):
     """UTC timestamps of the delivery hours: every hour of the CET days (base), or Monday to Friday 08:00–20:00 (peak)."""
     h = pd.date_range(pd.Timestamp(first, tz=TZ), (pd.Timestamp(last) + pd.Timedelta(days=1)).tz_localize(TZ), freq="h", inclusive="left")
     if profile == "peak":
-        h = h[(h.weekday < 5) & (h.hour >= 8) & (h.hour < 20)]
+        h = h[(h.day_of_week < 5) & (h.hour >= 8) & (h.hour < 20)]
     return h.tz_convert("UTC")
 
 

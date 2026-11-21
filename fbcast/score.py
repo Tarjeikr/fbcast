@@ -143,11 +143,23 @@ def score_day(day, fc, prices=None):
                       "p10": _f(getattr(r, "spread_p10", None)), "p50": _f(getattr(r, "spread_p50", None)), "p90": _f(getattr(r, "spread_p90", None)),
                       "clim_q10": _f(getattr(r, "clim_q10", None)), "clim_q50": _f(getattr(r, "clim_q50", None)), "clim_q90": _f(getattr(r, "clim_q90", None)),
                       "de": _f(r.DE), "fr": _f(r.FR), "de_p50": _f(getattr(r, "de_p50", None)), "fr_p50": _f(getattr(r, "fr_p50", None))} for r in H.itertuples()]}
+    if day in data.FR_FROM_JAO:  # the price feed had no French price for this day: it is the DE price minus JAO's published DE-FR price spread
+        out["fr_price_source"] = "jao_price_spread"
     return out
 
 
+def _prices_reproduced(new, old, tol=0.011):
+    """The outcomes of the daily products (base and peak of DE, FR and DE-FR) must come out the same to the cent."""
+    for key, v in (old.get("daily") or {}).items():
+        w = (new.get("daily") or {}).get(key)
+        if w is None or abs(w["actual"] - v["actual"]) > tol:
+            return False
+    return True
+
+
 def verify():
-    """Recompute every committed scorecard from freshly downloaded JAO and SMARD data and report any difference."""
+    """Recompute every committed scorecard from freshly downloaded JAO and SMARD data and report any difference: in the
+    binding and sign scores, and in the base and peak prices the daily products were scored against."""
     bad = 0
     files = sorted(glob.glob(os.path.join(ROOT, "scorecard", "2*.json")))
     days = [os.path.basename(f)[:-5] for f in files]
@@ -159,7 +171,8 @@ def verify():
         for ds in ("shadowPrices", "netPos"):
             data.fetch_day(ds, day, force=True)
         new = score_day(day, fc, prices)
-        same = new is not None and abs(new["bind"]["brier"] - old["bind"]["brier"]) < 1e-6 and abs(new["sign"]["brier"] - old["sign"]["brier"]) < 1e-6 and new["bind"]["actual_hours"] == old["bind"]["actual_hours"]
+        same = (new is not None and abs(new["bind"]["brier"] - old["bind"]["brier"]) < 1e-6 and abs(new["sign"]["brier"] - old["sign"]["brier"]) < 1e-6
+                and new["bind"]["actual_hours"] == old["bind"]["actual_hours"] and _prices_reproduced(new, old))
         ok_time = (new is None) or (new["status"] != "ex-ante") or (new.get("results_published_utc") is None) or (fc["issued_at_utc"] < new["results_published_utc"])
         print(f"{day}: scorecard {'reproduced' if same else 'DIFFERS'}; issued {fc['issued_at_utc'][:16]} status {new['status'] if new else fc['status']}; results published {new['results_published_utc'] if new else 'n/a'}")
         bad += (not same) or (not ok_time)
