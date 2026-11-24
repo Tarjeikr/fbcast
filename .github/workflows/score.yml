@@ -35,3 +35,28 @@ jobs:
           new=$(git ls-files --others --exclude-standard -- scorecard forecasts BOOK.md)
           changed=$(git diff --name-only -- scorecard forecasts book SCORECARD.md BOOK.md)
           bash .github/api-commit.sh "score $(date -u +%Y-%m-%dT%H:%MZ)" $new $changed
+      - name: alarm if tomorrow's forecast is missing or late (fails on purpose, so that GitHub sends a mail)
+        run: |
+          # Nothing else notices a morning without a forecast. From 12:15 CET on, every scoring run checks that the forecast
+          # for tomorrow is on the branch and was issued before the results; if not, this step fails and the run turns red.
+          # It looks at the files as checked out at the start of this run, a few minutes ago.
+          day=$(TZ=Europe/Berlin date -d tomorrow +%F)
+          if [ "$(TZ=Europe/Berlin date +%H%M)" -lt 1215 ]; then
+            echo "before 12:15 CET: nothing to say yet about the forecast for $day"
+            exit 0
+          fi
+          if [[ "$day" < "2026-11-26" ]]; then
+            echo "no alarm for $day: the forecasts for 23 to 25 Nov 2026 were lost before this check existed"
+            exit 0
+          fi
+          f="forecasts/$day.json"
+          if [ ! -f "$f" ]; then
+            echo "::error::No forecast for $day is on the branch, and the auction closed at 12:00 CET."
+            exit 1
+          fi
+          status=$(python -c "import json, sys; print(json.load(open(sys.argv[1])).get('status'))" "$f")
+          if [ "$status" != "ex-ante" ]; then
+            echo "::error::The forecast for $day was issued after the results were published (status: $status)."
+            exit 1
+          fi
+          echo "the forecast for $day is on the branch and was issued before the results"

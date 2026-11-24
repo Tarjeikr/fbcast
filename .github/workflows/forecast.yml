@@ -4,8 +4,8 @@ on:
     # GitHub starts the scheduled runs of this repository 4.5 to 10.5 hours after their cron time (every run from 4 to 21 Nov
     # 2026), and seems to keep only one start waiting per line. So nothing here depends on a run starting at a given time:
     # ANY run that starts after midnight CET, scheduled or by hand, waits for JAO to publish tomorrow's domain (about
-    # 09:55 CET) and then issues. A GitHub job may run for six hours, so a run that has waited 4 hours 45 minutes hands over
-    # to a fresh run. A run that finds the forecast issued, or an older run already waiting, stops by itself.
+    # 09:55 CET) and then issues. A GitHub job may run for six hours, so a run that has waited close to four hours hands
+    # over to a fresh run. A run that finds the forecast issued, or an older run already waiting, stops by itself.
     # With the delay, the lines from 18:37 to 00:37 UTC are the ones that start between midnight and the auction; the later
     # ones are there in case GitHub starts runs on time again. Times are UTC.
     - cron: "37 18 * * *"
@@ -26,7 +26,7 @@ permissions:
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 355
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -68,9 +68,9 @@ jobs:
         if: steps.gate.outputs.go == 'true'
         env:
           DAY: ${{ steps.gate.outputs.day }}
-        # 285 minutes of waiting leave an hour of the job's 350 for issuing; the step fails only if JAO has not published
-        # by 14:00 CET, when the auction has long cleared
-        run: python -m fbcast.wait --day "$DAY" --minutes 285 --every 120
+        # 230 minutes of waiting leave two hours of the job's 355 minutes for issuing; the step fails only if JAO has not
+        # published by 14:00 CET, when the auction has long cleared
+        run: python -m fbcast.wait --day "$DAY" --minutes 230 --every 120
       - name: hand over to a fresh run (JAO has not published yet and this run has used its time)
         if: steps.wait.outputs.outcome == 'handover'
         run: |
@@ -90,7 +90,10 @@ jobs:
         if: steps.wait.outputs.outcome == 'issue'
         env:
           DAY: ${{ steps.gate.outputs.day }}
-        run: python -m fbcast.forecast --day "$DAY" --wait-minutes 40
+        # JAO is slow to answer around its publication time: on 23 Nov 2026 this step needed 40 minutes, the whole of what
+        # it was then allowed, and the forecast went out at 10:49 CET. It now has 100 minutes for the domain to be complete.
+        # The price model's inputs are waited for no longer than 11:40 CET; after that the grid model issues alone.
+        run: python -m fbcast.forecast --day "$DAY" --wait-minutes 100
       - name: stamp the forecast on the Bitcoin blockchain (OpenTimestamps)
         if: steps.wait.outputs.outcome == 'issue'
         run: |
@@ -111,3 +114,19 @@ jobs:
           else
             exit "$rc"
           fi
+      - name: confirm that the forecast is on the branch (the run fails if it is not)
+        if: steps.wait.outputs.outcome == 'issue'
+        env:
+          DAY: ${{ steps.gate.outputs.day }}
+        run: |
+          # Asked of git itself, not of the commit step. From 22 to 24 Nov 2026 the commit step threw three forecasts away and
+          # the runs ended green. A run that has built a forecast must end red unless the file really is on the branch.
+          for attempt in 1 2 3; do
+            if git fetch -q origin "$GITHUB_REF_NAME" && git cat-file -e "FETCH_HEAD:forecasts/$DAY.json" 2>/dev/null; then
+              echo "forecasts/$DAY.json is on $GITHUB_REF_NAME"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::forecasts/$DAY.json is NOT on $GITHUB_REF_NAME, although this run built it and reached the commit step."
+          exit 1
