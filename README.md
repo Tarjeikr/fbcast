@@ -29,11 +29,17 @@ that count separately.
 4.5 to 10.5 hours after its cron time, so most forecasts of the first weeks that count were started by hand. Since the update
 of 21 November 2026 no run has to start at a particular time. Any run of the forecast workflow that starts after midnight CET,
 scheduled or started by hand, waits for JAO to publish the domain and then issues. A GitHub job may run for six hours, so a run
-that has waited 4 hours 45 minutes starts a fresh run to take over. A run that finds the forecast issued, or an older run
+that has waited close to four hours starts a fresh run to take over. A run that finds the forecast issued, or an older run
 already waiting, stops by itself, and the commit step never replaces a forecast that is already on the branch. The scoring
 workflow has three start times a day and the retrain workflow two; each run works out for itself whether there is anything
 to do. The retrain trains when there is no price model yet, when the model is 6.5 days old, or when `requirements.txt` has
 changed.
+
+**Three days lost.** From 22 to 24 November 2026 the forecast runs built the forecasts for 23, 24 and 25 November on time, with
+the price model, and the commit step then discarded them: a check meant to keep an issued forecast from being overwritten took
+GitHub's "not found" answer for a file that was already there. The runs ended green and nothing was saved, so those three days
+are not in the record. Since the fix of 24 November a run that has built a forecast ends red unless the file is on the branch,
+and the scoring workflow fails on purpose when the next day's forecast is missing or late.
 
 ## What is forecast
 
