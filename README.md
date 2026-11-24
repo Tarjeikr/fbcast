@@ -104,12 +104,19 @@ decoupled France then looks the same to the trees at €60 and at €200 power, 
 difference when the price level moved in November 2026.
 
 Each price is forecast twice and the two sets of quantiles are averaged: once as a level, and once as the change from
-yesterday's price at the same hour. Trees cannot forecast a level they have not seen, and from late October 2026 prices sat far
-above the history: the level model alone ran about 18 €/MWh low on the German base price in October and November. In the
-walk-forward test the average was the best of the variants tried on the validation months (November 2025 to May 2026). On the
-months after (June to 21 November 2026) it cut the German base error from 18.2 to 16.8 €/MWh and the French from 19.0 to 17.6,
-and the German low bias from 10.8 to 7.7. The bias is smaller, not gone: the forecast still runs low when prices jump.
-Anchoring on the mean of the last seven days instead was worse than the level model, and so was scaling the prices by it.
+yesterday's price at the same hour. The model has no fuel prices among its inputs, so it reads the price level only from past
+prices, and when the level moved up in October and November 2026 the level forecast alone ran about 18 €/MWh low on the German
+base price. (Prices that high are in its history, but on fewer than one day in ten, and nearly all of those days are in 2022.)
+In the walk-forward test the average was the best of the variants tried on the validation months (November 2025 to May 2026).
+On the months after (June to 21 November 2026) it cut the German base error from 18.2 to 16.8 €/MWh and the French from 19.0 to
+17.6, and the German low bias from 10.8 to 7.7. The bias is smaller, not gone: over the walk-forward year the German base price
+came out above the P50 on 63% of days.
+
+Variants tested and left out, because they did not help in the same test: anchoring on the mean of the last seven days, or
+scaling the prices by it (both worse than the level forecast); the change-from-yesterday forecast alone (German base error over
+the year 13.2 €/MWh against 13.1 for the average); and adding part of the mean error of the last days to the forecast, which
+moved the errors by a few per cent in either direction (the daily error does not carry over from one day to the next: its
+day-to-day correlation is 0.04).
 
 **Band calibration.** Raw quantile regressions under-cover. Every retrain therefore measures, on its own out-of-sample
 walk-forward errors of the last 90 days, how wide each half of the band should have been to hold 80% of outcomes, and stores
