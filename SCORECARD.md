@@ -2,15 +2,25 @@
 
 Forecasts of the German (DE-LU) and French day-ahead base and peak prices and of the DE−FR spread, issued every morning before the 12:00 CET auction and scored the next day against the prices that cleared. Base is all hours of the day; peak is Monday to Friday, 08:00 to 20:00 CET.
 
-Last scoring run: 2026-11-24 03:27 UTC.
+Last scoring run: 2026-11-24 19:04 UTC.
 
-## Forecast
+## Forecast for Wednesday 25 November 2026
 
-The first forecast of this record has not been issued yet.
+Issued 24 Nov at 17:47 CET, after the results were published: not counted. €/MWh: the P50, with the P10 to P90 band in brackets.
+
+| | Base | Peak |
+| --- | --- | --- |
+| DE | 214 (188 to 250) | 230 (199 to 288) |
+| FR | 214 (205 to 248) | 229 (216 to 283) |
+| DE−FR | −2 (−9 to +6) | −3 (−11 to +11) |
+
+## Record since Wednesday 25 November 2026: 0 days counted
+
+No day has been scored yet. Not counted, because issued late: Wed 25 Nov.
 
 ## Backtest of the model
 
-The live record is the test that counts, once it has started. This is what to expect from it: a walk-forward backtest from Sat 1 Nov 2025 to Fri 20 Nov 2026, refitted every month, in which every forecast comes from a model that had seen nothing from its own month.
+The live record above is the test that counts. This is what to expect from it: a walk-forward backtest from Sat 1 Nov 2025 to Fri 20 Nov 2026, refitted every month, in which every forecast comes from a model that had seen nothing from its own month.
 
 | | Days | Average price | Error, €/MWh | Error of yesterday's price | In band |
 | --- | --- | --- | --- | --- | --- |
@@ -23,4 +33,4 @@ The live record is the test that counts, once it has started. This is what to ex
 
 ## Where things are
 
-How the forecast is made: `README.md`. Each forecast as issued, hour by hour: `forecasts/`. Each day's score: `scorecard/`. The forecasts already in those folders came from the first, grid-only version of this project and are not part of this record.
+How the forecast is made: `README.md`. Each forecast as issued, hour by hour: `forecasts/`. Each day's score: `scorecard/`. Forecasts issued before Wed 25 Nov 2026 came from the first, grid-only version of this project; they remain in the same folders and are not part of this record.
