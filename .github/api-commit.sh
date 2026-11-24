@@ -14,7 +14,16 @@ branch="${GITHUB_REF_NAME:-main}"
 create_only="${CREATE_ONLY:-0}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-on_branch() { gh api "repos/$repo/contents/$1?ref=$branch" -q .sha 2>/dev/null || true; }
+# The blob SHA of a file on the branch, or nothing if the file is not there. `gh api` prints GitHub's answer on standard output
+# also when the answer is an error ({"message":"Not Found",...}, exit status 1), so output alone proves nothing: the file is
+# there only if gh succeeded AND the answer is a 40-character SHA. (From 21 to 24 Nov 2026 any output counted as "there": with
+# CREATE_ONLY every new forecast was taken for one already issued and thrown away, three days running.)
+on_branch() {
+  local out
+  if out=$(gh api "repos/$repo/contents/$1?ref=$branch" -q .sha 2>/dev/null) && [[ "$out" =~ ^[0-9a-f]{40}$ ]]; then
+    printf '%s\n' "$out"
+  fi
+}
 for f in "$@"; do
   [ -f "$f" ] || continue
   if [ "$create_only" = 1 ] && [ -n "$(on_branch "$f")" ]; then
