@@ -2,21 +2,40 @@
 
 Forecasts of the German (DE-LU) and French day-ahead base and peak prices and of the DE−FR spread, issued every morning before the 12:00 CET auction and scored the next day against the prices that cleared. Base is all hours of the day; peak is Monday to Friday, 08:00 to 20:00 CET.
 
-Last scoring run: 2026-11-25 01:31 UTC.
+Last scoring run: 2026-11-25 18:10 UTC.
 
-## Forecast for Wednesday 25 November 2026
+## Forecast for Thursday 26 November 2026
 
-Issued 24 Nov at 17:47 CET, after the results were published: not counted. €/MWh: the P50, with the P10 to P90 band in brackets.
+Issued 25 Nov at 10:58 CET, before the auction closed. €/MWh: the P50, with the P10 to P90 band in brackets.
 
 | | Base | Peak |
 | --- | --- | --- |
-| DE | 214 (188 to 250) | 230 (199 to 288) |
-| FR | 214 (205 to 248) | 229 (216 to 283) |
-| DE−FR | −2 (−9 to +6) | −3 (−11 to +11) |
+| DE | 264 (244 to 321) | 290 (264 to 390) |
+| FR | 252 (232 to 296) | 276 (249 to 354) |
+| DE−FR | −0 (−8 to +2) | +0 (−8 to +4) |
 
-## Record since Wednesday 25 November 2026: 0 days counted
+## Record since Wednesday 25 November 2026: 1 day counted
 
-No day has been scored yet. Not counted, because issued late: Wed 25 Nov.
+| | Days | Error, €/MWh | Error of yesterday's price | In band |
+| --- | --- | --- | --- | --- |
+| DE base | 1 | 27.4 | 45.5 | 1 of 1 |
+| DE peak | 1 | 53.5 | 74.1 | 1 of 1 |
+| FR base | 1 | 37.8 | 34.3 | 1 of 1 |
+| FR peak | 1 | 60.3 | 49.4 | 1 of 1 |
+| DE−FR base | 1 | 2.4 | 11.2 | 1 of 1 |
+| DE−FR peak | 1 | 6.3 | 24.7 | 0 of 1 |
+
+Error is the average absolute difference between the P50 and the price that cleared. The benchmark is the same error for a forecast that repeats the product's last delivered price: yesterday's for base, the previous weekday's for peak. In band counts the days on which the outcome fell inside the P10 to P90 band, which should be about four in five.
+
+A forecast counts only if it was issued before the results were published; 1 of the 1 were issued before the auction closed. Not counted, because issued late: Wed 25 Nov.
+
+## Day by day: forecast → price that cleared, €/MWh
+
+| Day | DE base | DE peak | FR base | FR peak | DE−FR base | DE−FR peak |
+| --- | --- | --- | --- | --- | --- | --- |
+| Thu 26 Nov | 264 → 292 | 290 → 343 | 252 → 289 | 276 → 337 | −0 → +2 | +0 → +7 * |
+
+\* The price cleared outside the P10 to P90 band.
 
 ## Backtest of the model
 
