@@ -2,37 +2,40 @@
 
 Forecasts of the German (DE-LU) and French day-ahead base and peak prices and of the DE−FR spread, issued every morning before the 12:00 CET auction and scored the next day against the prices that cleared. Base is all hours of the day; peak is Monday to Friday, 08:00 to 20:00 CET.
 
-Last scoring run: 2026-11-27 01:08 UTC.
+Last scoring run: 2026-11-27 17:38 UTC.
 
-## Forecast for Friday 27 November 2026
+## Forecast for Saturday 28 November 2026
 
-Issued 26 Nov at 10:43 CET, before the auction closed. €/MWh: the P50, with the P10 to P90 band in brackets.
+Issued 27 Nov at 10:24 CET, before the auction closed. €/MWh: the P50, with the P10 to P90 band in brackets.
 
 | | Base | Peak |
 | --- | --- | --- |
-| DE | 302 (270 to 374) | 341 (301 to 468) |
-| FR | 286 (267 to 331) | 323 (293 to 405) |
-| DE−FR | +7 (−4 to +12) | +11 (−3 to +18) |
+| DE | 230 (206 to 274) | – |
+| FR | 236 (210 to 272) | – |
+| DE−FR | −3 (−21 to −1) | – |
 
-## Record since Wednesday 25 November 2026: 2 days counted
+There is no peak product on a Saturday.
+
+## Record since Wednesday 25 November 2026: 3 days counted
 
 | | Days | Error, €/MWh | Error of yesterday's price | In band |
 | --- | --- | --- | --- | --- |
-| DE base | 2 | 13.8 | 27.8 | 2 of 2 |
+| DE base | 3 | 21.9 | 55.2 | 2 of 3 |
 | DE peak | 2 | 29.9 | 39.1 | 2 of 2 |
-| FR base | 2 | 25.2 | 21.9 | 2 of 2 |
+| FR base | 3 | 28.5 | 47.2 | 2 of 3 |
 | FR peak | 2 | 41.3 | 29.2 | 2 of 2 |
-| DE−FR base | 2 | 3.3 | 5.8 | 2 of 2 |
+| DE−FR base | 3 | 4.2 | 8.0 | 3 of 3 |
 | DE−FR peak | 2 | 7.7 | 14.8 | 1 of 2 |
 
 Error is the average absolute difference between the P50 and the price that cleared. The benchmark is the same error for a forecast that repeats the product's last delivered price: yesterday's for base, the previous weekday's for peak. In band counts the days on which the outcome fell inside the P10 to P90 band, which should be about four in five.
 
-A forecast counts only if it was issued before the results were published; 2 of the 2 were issued before the auction closed. Not counted, because issued late: Wed 25 Nov.
+A forecast counts only if it was issued before the results were published; 3 of the 3 were issued before the auction closed. Not counted, because issued late: Wed 25 Nov.
 
 ## Day by day: forecast → price that cleared, €/MWh
 
 | Day | DE base | DE peak | FR base | FR peak | DE−FR base | DE−FR peak |
 | --- | --- | --- | --- | --- | --- | --- |
+| Sat 28 Nov | 230 → 192 * | – | 236 → 201 * | – | −3 → −9 | – |
 | Fri 27 Nov | 302 → 302 | 341 → 348 | 286 → 299 | 323 → 346 | +7 → +3 | +11 → +2 |
 | Thu 26 Nov | 264 → 292 | 290 → 343 | 252 → 289 | 276 → 337 | −0 → +2 | +0 → +7 * |
 
