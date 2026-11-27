@@ -2,7 +2,7 @@
 
 Forecasts of the German (DE-LU) and French day-ahead base and peak prices and of the DE−FR spread, issued every morning before the 12:00 CET auction and scored the next day against the prices that cleared. Base is all hours of the day; peak is Monday to Friday, 08:00 to 20:00 CET.
 
-Last scoring run: 2026-11-27 17:38 UTC.
+Last scoring run: 2026-11-27 22:11 UTC.
 
 ## Forecast for Saturday 28 November 2026
 
